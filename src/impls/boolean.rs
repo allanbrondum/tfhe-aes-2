@@ -1,269 +1,374 @@
 use crate::{Block, Key};
-use std::convert::AsMut;
+use std::ops::{BitXor, BitXorAssign, Index, IndexMut};
 
-static SBOX: [[u8; 16]; 16] = [
-    [
-        0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab,
-        0x76,
-    ],
-    [
-        0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72,
-        0xc0,
-    ],
-    [
-        0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31,
-        0x15,
-    ],
-    [
-        0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2,
-        0x75,
-    ],
-    [
-        0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0, 0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f,
-        0x84,
-    ],
-    [
-        0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58,
-        0xcf,
-    ],
-    [
-        0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85, 0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f,
-        0xa8,
-    ],
-    [
-        0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5, 0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3,
-        0xd2,
-    ],
-    [
-        0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19,
-        0x73,
-    ],
-    [
-        0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b,
-        0xdb,
-    ],
-    [
-        0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4,
-        0x79,
-    ],
-    [
-        0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae,
-        0x08,
-    ],
-    [
-        0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b,
-        0x8a,
-    ],
-    [
-        0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d,
-        0x9e,
-    ],
-    [
-        0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28,
-        0xdf,
-    ],
-    [
-        0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb,
-        0x16,
-    ],
+static SBOX: [u8; 256] = [
+    0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
+    0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
+    0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
+    0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75,
+    0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0, 0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84,
+    0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
+    0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85, 0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8,
+    0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5, 0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2,
+    0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
+    0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
+    0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
+    0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
+    0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
+    0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
+    0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
+    0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16,
 ];
 
 static RC: [u8; 11] = [
     0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36,
 ];
 
-fn clone_into_array<A, T>(slice: &[T]) -> A
-where
-    A: Default + AsMut<[T]>,
-    T: Clone,
-{
-    let mut a = A::default();
-    <A as AsMut<[T]>>::as_mut(&mut a).clone_from_slice(slice);
-    a
-}
+#[derive(Debug, Default, Copy, Clone)]
+pub struct BoolByte([bool; 8]);
 
-fn substitute(byte: u8) -> u8 {
-    let upper_nibble: usize;
-    let lower_nibble: usize;
-    upper_nibble = ((byte >> 4) & 0xF).into();
-    lower_nibble = (byte & 0xF).into();
-
-    SBOX[upper_nibble][lower_nibble]
-}
-
-fn rot_word(word: &[u8; 4]) -> [u8; 4] {
-    let mut result = [0u8; 4];
-
-    for i in 0..4 {
-        result[i] = word[(i + 1) % 4];
+impl BoolByte {
+    const fn zero() -> Self {
+        Self([false; 8])
     }
-
-    result
 }
 
-fn sub_word(word: &[u8; 4]) -> [u8; 4] {
-    let mut result = [0u8; 4];
+impl Index<usize> for BoolByte {
+    type Output = bool;
 
-    for i in 0..4 {
-        result[i] = substitute(word[i]);
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
     }
-
-    result
 }
 
-fn xor_words(word1: &[u8; 4], word2: &[u8; 4]) -> [u8; 4] {
-    let mut result = [0u8; 4];
-
-    for i in 0..4 {
-        result[i] = word1[i] ^ word2[i];
+impl IndexMut<usize> for BoolByte {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.0[index]
     }
-
-    result
 }
 
-fn add_round_key(state: &mut [[u8; 4]; 4], key: &[[u8; 4]; 4]) {
-    for i in 0..4 {
-        for j in 0..4 {
-            state[i][j] = state[i][j] ^ key[j][i];
+impl BitXorAssign for BoolByte {
+    fn bitxor_assign(&mut self, rhs: Self) {
+        for (b, rhs_b) in self.0.iter_mut().zip(rhs.0.iter()) {
+            *b ^= rhs_b;
         }
     }
 }
 
-fn sub_bytes(state: &mut [[u8; 4]; 4]) {
-    for i in 0..4 {
-        for j in 0..4 {
-            state[i][j] = substitute(state[i][j]);
+impl BitXor for BoolByte {
+    type Output = BoolByte;
+
+    fn bitxor(mut self, rhs: Self) -> Self::Output {
+        self.bitxor_assign(rhs);
+        self
+    }
+}
+
+impl From<u8> for BoolByte {
+    fn from(value: u8) -> Self {
+        let mut byte = BoolByte::default();
+        for i in 0..8 {
+            byte[i] = 0 != (value & (0x80 >> i));
+        }
+        byte
+    }
+}
+
+impl From<BoolByte> for u8 {
+    fn from(value: BoolByte) -> Self {
+        let mut byte = u8::default();
+        for i in 0..8 {
+            byte |= if value[i] { 0x80 >> i } else { 0 };
+        }
+        byte
+    }
+}
+
+/// State of 4 rows each of 4 bytes
+#[derive(Debug, Default)]
+struct State([Word; 4]);
+
+impl State {
+    pub fn from_array(block: &[u8; 16]) -> Self {
+        let mut this = Self::default();
+        for i in 0..16 {
+            this[i % 4][i / 4] = block[i].into();
+        }
+        this
+    }
+
+    pub fn to_array(&self) -> [u8; 16] {
+        let mut array: [u8; 16] = Default::default();
+        for i in 0..16 {
+            array[i] = self[i % 4][i / 4].into();
+        }
+        array
+    }
+
+    pub fn bytes_mut(&mut self) -> impl Iterator<Item = &mut BoolByte> {
+        self.0.iter_mut().flat_map(|w| w.0.iter_mut())
+    }
+
+    pub fn rows_mut(&mut self) -> impl Iterator<Item = &mut Word> {
+        self.0.iter_mut()
+    }
+
+    pub fn column(&self, j: usize) -> ColumnView<'_> {
+        ColumnView(j, &self.0)
+    }
+
+    pub fn column_mut(&mut self, j: usize) -> ColumnViewMut<'_> {
+        ColumnViewMut(j, &mut self.0)
+    }
+}
+
+impl BitXorAssign<&[Word; 4]> for State {
+    fn bitxor_assign(&mut self, rhs: &[Word; 4]) {
+        for (word, rhs_word) in self.0.iter_mut().zip(rhs.iter()) {
+            *word ^= *rhs_word;
         }
     }
 }
 
-fn shift_rows(state: &mut [[u8; 4]; 4]) {
-    for i in 1..4 {
-        let mut tmp = vec![0u8; i];
-        for j in 0..i {
-            tmp[j] = state[i][j];
+impl Index<usize> for State {
+    type Output = Word;
+
+    fn index(&self, row: usize) -> &Self::Output {
+        &self.0[row]
+    }
+}
+
+impl IndexMut<usize> for State {
+    fn index_mut(&mut self, row: usize) -> &mut Self::Output {
+        &mut self.0[row]
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct ColumnView<'a>(usize, &'a [Word; 4]);
+
+impl<'a> ColumnView<'a> {
+    fn to_word(&self) -> Word {
+        let mut col: Word = Default::default();
+        for i in 0..4 {
+            col.0[i] = self.1[i][self.0];
         }
-        for j in 0..4 - i {
-            state[i][j] = state[i][j + i];
-        }
-        for j in 0..i {
-            state[i][3 - j] = tmp[i - j - 1];
+        col
+    }
+}
+
+#[derive(Debug)]
+pub struct ColumnViewMut<'a>(usize, &'a mut [Word; 4]);
+
+impl<'a> ColumnViewMut<'a> {
+    pub fn bytes(&self) -> impl Iterator<Item = BoolByte> + '_ {
+        (0..4).map(|i| self.1[i][self.0])
+    }
+
+    pub fn bytes_mut(&mut self) -> impl Iterator<Item = &'_ mut BoolByte> + '_ {
+        self.1.iter_mut().map(|row| &mut row[self.0])
+    }
+
+    pub fn bitxor_assign(&mut self, rhs: Word) {
+        for (byte, rhs_byte) in self.bytes_mut().zip(rhs.bytes()) {
+            *byte ^= rhs_byte;
         }
     }
 }
 
-fn galois_multiplication(ap: u8, bp: u8) -> u8 {
-    let mut p = 0u8;
-    let mut high_bit = 0u8;
-    let mut a = ap;
-    let mut b = bp;
-    for i in 0..8 {
+#[derive(Debug, Default, Copy, Clone)]
+pub struct Word([BoolByte; 4]);
+
+impl Word {
+    pub const fn zero() -> Self {
+        Self([BoolByte::zero(); 4])
+    }
+
+    pub fn bytes(&self) -> impl Iterator<Item = BoolByte> + '_ {
+        self.0.iter().copied()
+    }
+
+    pub fn bytes_mut(&mut self) -> impl Iterator<Item = &mut BoolByte> {
+        self.0.iter_mut()
+    }
+
+    pub fn rotate_left(mut self, mid: usize) -> Self {
+        self.0.rotate_left(mid);
+        self
+    }
+}
+
+impl BitXorAssign for Word {
+    fn bitxor_assign(&mut self, rhs: Self) {
+        for (byte, rhs_byte) in self.bytes_mut().zip(rhs.bytes()) {
+            *byte ^= rhs_byte;
+        }
+    }
+}
+
+impl BitXor for Word {
+    type Output = Word;
+
+    fn bitxor(mut self, rhs: Self) -> Self::Output {
+        self.bitxor_assign(rhs);
+        self
+    }
+}
+
+impl Index<usize> for Word {
+    type Output = BoolByte;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl IndexMut<usize> for Word {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.0[index]
+    }
+}
+
+fn substitute(byte: BoolByte) -> BoolByte {
+    SBOX[u8::from(byte) as usize].into()
+}
+
+fn xor_state(state: &mut State, key: &[Word; 4]) {
+    for j in 0..4 {
+        state.column_mut(j).bitxor_assign(key[j]);
+    }
+}
+
+fn sub_bytes(state: &mut State) {
+    for byte in state.bytes_mut() {
+        *byte = substitute(*byte);
+    }
+}
+
+fn shift_rows(state: &mut State) {
+    for (i, row) in state.rows_mut().enumerate() {
+        *row = row.rotate_left(i);
+    }
+}
+
+/// Multiplication in F_2[X]/(X^8 + X^4 + X^3 + X + 1)
+fn gf_256_mul(a: BoolByte, mut b: u8) -> BoolByte {
+    let mut res = 0u8;
+    let mut a = u8::from(a);
+    for _ in 0..8 {
         if b & 1 == 1 {
-            p ^= a
+            res ^= a
         }
-        high_bit = a & 0x80;
-        a = (a << 1) & 0xFF;
-        if high_bit == 0x80 {
+        let high_bit = a & 0x80;
+        a <<= 1;
+        if high_bit != 0x80 {
             a ^= 0x1b;
         }
-        b = (b >> 1) & 0xFF;
+        b >>= 1;
     }
-    p & 0xFF
+    res.into()
 }
 
-fn mix_columns(state: &mut [[u8; 4]; 4]) {
+fn mix_columns(state: &mut State) {
+    for j in 0..4 {
+        let col = state.column(j).to_word();
+
+        state[0][j] = gf_256_mul(col[0], 2)
+            ^ gf_256_mul(col[3], 1)
+            ^ gf_256_mul(col[2], 1)
+            ^ gf_256_mul(col[1], 3);
+        state[1][j] = gf_256_mul(col[1], 2)
+            ^ gf_256_mul(col[0], 1)
+            ^ gf_256_mul(col[3], 1)
+            ^ gf_256_mul(col[2], 3);
+        state[2][j] = gf_256_mul(col[2], 2)
+            ^ gf_256_mul(col[1], 1)
+            ^ gf_256_mul(col[0], 1)
+            ^ gf_256_mul(col[3], 3);
+        state[3][j] = gf_256_mul(col[3], 2)
+            ^ gf_256_mul(col[2], 1)
+            ^ gf_256_mul(col[1], 1)
+            ^ gf_256_mul(col[0], 3);
+    }
+}
+
+pub fn encrypt_block(expanded_key: &[Word; 44], block: Block, rounds: usize) -> Block {
+    let mut state = State::from_array(&block);
+
+    xor_state(
+        &mut state,
+        expanded_key[0..4].try_into().expect("array length 4"),
+    );
+
+    for i in 1..rounds {
+        sub_bytes(&mut state);
+        shift_rows(&mut state);
+        mix_columns(&mut state);
+        xor_state(
+            &mut state,
+            expanded_key[i * 4..(i + 1) * 4]
+                .try_into()
+                .expect("array length 4"),
+        );
+    }
+
+    sub_bytes(&mut state);
+    shift_rows(&mut state);
+    xor_state(
+        &mut state,
+        expanded_key[40..44].try_into().expect("array length 4"),
+    );
+
+    state.to_array()
+}
+
+pub fn key_schedule(key_slice: &Key) -> [Word; 44] {
+    let mut key: [Word; 4] = Default::default();
+    let mut expanded_key: [Word; 44] = [Word::zero(); 44];
+
     for i in 0..4 {
-        let mut temp = [0u8; 4];
         for j in 0..4 {
-            temp[j] = state[j][i];
+            key[i][j] = key_slice[i * 4 + j].into();
         }
-
-        state[0][i] = galois_multiplication(temp[0], 2)
-            ^ galois_multiplication(temp[3], 1)
-            ^ galois_multiplication(temp[2], 1)
-            ^ galois_multiplication(temp[1], 3);
-        state[1][i] = galois_multiplication(temp[1], 2)
-            ^ galois_multiplication(temp[0], 1)
-            ^ galois_multiplication(temp[3], 1)
-            ^ galois_multiplication(temp[2], 3);
-        state[2][i] = galois_multiplication(temp[2], 2)
-            ^ galois_multiplication(temp[1], 1)
-            ^ galois_multiplication(temp[0], 1)
-            ^ galois_multiplication(temp[3], 3);
-        state[3][i] = galois_multiplication(temp[3], 2)
-            ^ galois_multiplication(temp[2], 1)
-            ^ galois_multiplication(temp[1], 1)
-            ^ galois_multiplication(temp[0], 3);
-    }
-}
-
-pub fn key_schedule(key_bytes: &Key) -> [[u8; 4]; 44] {
-    let mut original_key = [[0u8; 4]; 4];
-    let mut expanded_key = [[0u8; 4]; 44];
-    let N = 4;
-
-    for i in 0..16 {
-        original_key[i / 4][i % 4] = key_bytes[i];
     }
 
-    for i in 0..44 {
-        // 11 rounds, i in 0..4*rounds-1
+    for i in 0..4 {
+        expanded_key[i] = key[i];
+    }
 
-        if i < N {
-            expanded_key[i] = original_key[i];
-        } else if i >= N && i % N == 0 {
-            let mut rcon = [0u8; 4];
-            rcon[0] = RC[i / N];
-            expanded_key[i] = xor_words(
-                &xor_words(
-                    &expanded_key[i - N],
-                    &sub_word(&rot_word(&expanded_key[i - 1])),
-                ),
-                &rcon,
-            );
+    for i in 4..44 {
+        if i % 4 == 0 {
+            let mut rcon = Word::default();
+            rcon[0] = RC[i / 4].into();
+            expanded_key[i] =
+                expanded_key[i - 4] ^ sub_word(expanded_key[i - 1].rotate_left(1)) ^ rcon;
         } else {
-            expanded_key[i] = xor_words(&expanded_key[i - N], &expanded_key[i - 1]);
+            expanded_key[i] = expanded_key[i - 4] ^ expanded_key[i - 1];
         }
     }
 
     expanded_key
 }
 
-pub fn encrypt_block(expanded_key: [[u8; 4]; 44], bytes: &Block, rounds: usize) -> Block {
-    let mut result = [0u8; 16];
-
-    let mut state = [[0u8; 4]; 4];
-    for i in 0..16 {
-        state[i % 4][i / 4] = bytes[i];
+fn sub_word(mut word: Word) -> Word {
+    for byte in word.bytes_mut() {
+        *byte = substitute(*byte);
     }
-
-    add_round_key(&mut state, &clone_into_array(&expanded_key[0..4]));
-
-    for i in 1..rounds {
-        sub_bytes(&mut state);
-        shift_rows(&mut state);
-        mix_columns(&mut state);
-        add_round_key(
-            &mut state,
-            &clone_into_array(&expanded_key[i * 4..(i + 1) * 4]),
-        );
-    }
-
-    sub_bytes(&mut state);
-    shift_rows(&mut state);
-    add_round_key(&mut state, &clone_into_array(&expanded_key[40..44]));
-
-    for i in 0..4 {
-        for j in 0..4 {
-            result[4 * j + i] = state[i][j]
-        }
-    }
-
-    result
+    word
 }
 
 pub fn encrypt_single_block(key: Key, block: Block, rounds: usize) -> Block {
     let key_schedule = key_schedule(&key);
-    let encrypted = encrypt_block(key_schedule, &block, rounds);
-    encrypted
+    encrypt_block(&key_schedule, block, rounds)
+}
+
+#[cfg(test)]
+mod test {
+    use crate::impls::boolean::BoolByte;
+
+    #[test]
+    fn test_bool_byte() {
+        let byte = 0x12;
+        assert_eq!(u8::from(BoolByte::from(byte)), byte);
+    }
 }
