@@ -1,4 +1,5 @@
 use crate::{Block, Key};
+use std::ops::{BitXor, BitXorAssign, Index, IndexMut};
 
 static SBOX: [u8; 256] = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -23,61 +24,128 @@ static RC: [u8; 11] = [
     0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36,
 ];
 
-type State = [[u8; 4]; 4];
+/// State of 4 rows each of 4 bytes
+#[derive(Debug, Default)]
+struct State([Word; 4]);
+
+impl State {
+    pub fn from_array(block: &[u8; 16]) -> Self {
+        let mut this = Self::default();
+        for i in 0..16 {
+            this[i % 4][i / 4] = block[i];
+        }
+        this
+    }
+
+    pub fn to_array(&self) -> [u8; 16] {
+        let mut array: [u8; 16] = Default::default();
+        for i in 0..16 {
+            array[i] = self[i % 4][i / 4];
+        }
+        array
+    }
+
+    pub fn bytes_mut(&mut self) -> impl Iterator<Item = &mut u8> {
+        self.0.iter_mut().flat_map(|w| w.0.iter_mut())
+    }
+
+    pub fn rows_mut(&mut self) -> impl Iterator<Item = &mut Word> {
+        self.0.iter_mut()
+    }
+
+    pub fn column(&self, j: usize) -> Word {
+        let mut col: Word = Default::default();
+        for i in 0..4 {
+            col.0[i] = self.0[i][j];
+        }
+        col
+    }
+}
+
+impl BitXorAssign<&[Word; 4]> for State {
+    fn bitxor_assign(&mut self, rhs: &[Word; 4]) {
+        for (word, rhs_word) in self.0.iter_mut().zip(rhs.iter()) {
+            *word ^= *rhs_word;
+        }
+    }
+}
+
+impl Index<usize> for State {
+    type Output = Word;
+
+    fn index(&self, row: usize) -> &Self::Output {
+        &self.0[row]
+    }
+}
+
+impl IndexMut<usize> for State {
+    fn index_mut(&mut self, row: usize) -> &mut Self::Output {
+        &mut self.0[row]
+    }
+}
+
+#[derive(Debug, Default, Copy, Clone)]
+pub struct Word([u8; 4]);
+
+impl Word {
+    pub const fn zero() -> Self {
+        Self([0; 4])
+    }
+
+    pub fn bytes_mut(&mut self) -> impl Iterator<Item = &mut u8> {
+        self.0.iter_mut()
+    }
+
+    pub fn rotate_left(mut self, mid: usize) -> Self {
+        self.0.rotate_left(mid);
+        self
+    }
+}
+
+impl BitXorAssign for Word {
+    fn bitxor_assign(&mut self, rhs: Self) {
+        for (byte, rhs_byte) in self.0.iter_mut().zip(rhs.0.iter()) {
+            *byte ^= rhs_byte;
+        }
+    }
+}
+
+impl BitXor for Word {
+    type Output = Word;
+
+    fn bitxor(mut self, rhs: Self) -> Self::Output {
+        self.bitxor_assign(rhs);
+        self
+    }
+}
+
+impl Index<usize> for Word {
+    type Output = u8;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl IndexMut<usize> for Word {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.0[index]
+    }
+}
 
 fn substitute(byte: u8) -> u8 {
     SBOX[byte as usize]
 }
 
-fn rot_word(word: &[u8; 4]) -> [u8; 4] {
-    let mut result = [0u8; 4];
-
-    for i in 0..4 {
-        result[i] = word[(i + 1) % 4];
-    }
-
-    result
-}
-
-fn sub_word(word: &[u8; 4]) -> [u8; 4] {
-    let mut result = [0u8; 4];
-
-    for i in 0..4 {
-        result[i] = substitute(word[i]);
-    }
-
-    result
-}
-
-fn xor_words(word1: &[u8; 4], word2: &[u8; 4]) -> [u8; 4] {
-    let mut result = [0u8; 4];
-
-    for i in 0..4 {
-        result[i] = word1[i] ^ word2[i];
-    }
-
-    result
-}
-
-fn xor_state(state: &mut State, key: &[[u8; 4]]) {
-    for i in 0..4 {
-        for j in 0..4 {
-            state[i][j] = state[i][j] ^ key[j][i];
-        }
-    }
-}
-
 fn sub_bytes(state: &mut State) {
-    for i in 0..4 {
-        for j in 0..4 {
-            state[i][j] = substitute(state[i][j]);
-        }
+    for byte in state.bytes_mut() {
+        *byte = substitute(*byte);
     }
 }
 
 fn shift_rows(state: &mut State) {
-    for i in 0..4 {
-        state[i].rotate_left(i);
+    for (i, row) in state.rows_mut().enumerate() {
+        *row = row.rotate_left(i);
     }
 }
 
@@ -100,10 +168,7 @@ fn gf_256_mul(mut a: u8, mut b: u8) -> u8 {
 
 fn mix_columns(state: &mut State) {
     for j in 0..4 {
-        let mut col = [0u8; 4];
-        for i in 0..4 {
-            col[i] = state[i][j];
-        }
+        let col = state.column(j);
 
         state[0][j] = gf_256_mul(col[0], 2)
             ^ gf_256_mul(col[3], 1)
@@ -124,64 +189,62 @@ fn mix_columns(state: &mut State) {
     }
 }
 
-pub fn key_schedule(key_slice: &Key) -> [[u8; 4]; 44] {
-    let mut key = [[0u8; 4]; 4];
-    let mut expanded_key = [[0u8; 4]; 44];
+pub fn encrypt_block(expanded_key: &[Word; 44], block: Block, rounds: usize) -> Block {
+    let mut state = State::from_array(&block);
 
+    state ^= expanded_key[0..4].try_into().expect("array length 4");
 
-    for i in 0..16 {
-        key[i / 4][i % 4] = key_slice[i];
+    for i in 1..rounds {
+        sub_bytes(&mut state);
+        shift_rows(&mut state);
+        mix_columns(&mut state);
+        state ^= expanded_key[i * 4..(i + 1) * 4]
+            .try_into()
+            .expect("array length 4");
     }
 
-    const N: usize = 4;
-    for i in 0..44 {
-        // 11 rounds, i in 0..4*rounds-1
+    sub_bytes(&mut state);
+    shift_rows(&mut state);
+    state ^= expanded_key[40..44].try_into().expect("array length 4");
 
-        if i < N {
-            expanded_key[i] = key[i];
-        } else if i >= N && i % N == 0 {
-            let mut rcon = [0u8; 4];
-            rcon[0] = RC[i / N];
-            expanded_key[i] = xor_words(
-                &xor_words(
-                    &expanded_key[i - N],
-                    &sub_word(&rot_word(&expanded_key[i - 1])),
-                ),
-                &rcon,
-            );
+    state.to_array()
+}
+
+pub fn key_schedule(key_slice: &Key) -> [Word; 44] {
+    let mut key: [Word; 4] = Default::default();
+    let mut expanded_key: [Word; 44] = [Word::zero(); 44];
+
+    for i in 0..4 {
+        key[i] = Word(
+            key_slice[i * 4..(i + 1) * 4]
+                .try_into()
+                .expect("array length 4"),
+        );
+    }
+
+    for i in 0..4 {
+        expanded_key[i] = key[i];
+    }
+
+    for i in 4..44 {
+        if i % 4 == 0 {
+            let mut rcon = Word::default();
+            rcon[0] = RC[i / 4];
+            expanded_key[i] =
+                expanded_key[i - 4] ^ sub_word(expanded_key[i - 1].rotate_left(1)) ^ rcon;
         } else {
-            expanded_key[i] = xor_words(&expanded_key[i - N], &expanded_key[i - 1]);
+            expanded_key[i] = expanded_key[i - 4] ^ expanded_key[i - 1];
         }
     }
 
     expanded_key
 }
 
-pub fn encrypt_block(expanded_key: &[[u8; 4]; 44], mut block: Block, rounds: usize) -> Block {
-    let mut state = [[0u8; 4]; 4];
-    for i in 0..16 {
-        state[i % 4][i / 4] = block[i];
+fn sub_word(mut word: Word) -> Word {
+    for byte in word.bytes_mut() {
+        *byte = substitute(*byte);
     }
-
-    xor_state(&mut state, &expanded_key[0..4]);
-
-    for i in 1..rounds {
-        sub_bytes(&mut state);
-        shift_rows(&mut state);
-        mix_columns(&mut state);
-        xor_state(&mut state, &expanded_key[i * 4..(i + 1) * 4]);
-    }
-
-    sub_bytes(&mut state);
-    shift_rows(&mut state);
-    xor_state(&mut state, &expanded_key[40..44]);
-
-    for i in 0..4 {
-        for j in 0..4 {
-            block[4 * j + i] = state[i][j]
-        }
-    }
-    block
+    word
 }
 
 pub fn encrypt_single_block(key: Key, block: Block, rounds: usize) -> Block {

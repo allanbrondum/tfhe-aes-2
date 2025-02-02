@@ -31,7 +31,7 @@ fn main() {
 
 fn encrypt_plain(key: Key, block: Block) -> Block {
     let key_schedule = plain::key_schedule(&key);
-    let encrypted = plain::encrypt_block(key_schedule, &block, ROUNDS);
+    let encrypted = plain::encrypt_block(&key_schedule, block, ROUNDS);
     encrypted
 }
 
