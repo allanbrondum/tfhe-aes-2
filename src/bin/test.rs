@@ -14,8 +14,7 @@ fn main() {
     rng.fill(&mut key);
     rng.fill(&mut iv);
 
-
-    let counter : u64 = 1;
+    let counter: u64 = 1;
     let mut block = [0u8; 16];
     block[0..8].copy_from_slice(&iv);
     block[8..16].copy_from_slice(&counter.to_be_bytes());

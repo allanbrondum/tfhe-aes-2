@@ -1,14 +1,13 @@
-pub mod plain;
 pub mod boolean;
-pub mod plain2;
+pub mod plain;
 
 #[cfg(test)]
 mod test {
+    use crate::impls::{boolean, plain};
     use crate::{Block, Key, ROUNDS};
     use aes::cipher::{BlockEncrypt, KeyInit};
     use rand::{Rng, SeedableRng};
     use rand_chacha::ChaCha20Rng;
-    use crate::impls::{boolean, plain, plain2};
 
     fn encrypt_aes_lib(key: Key, block: Block) -> Block {
         let aes = aes::Aes128::new_from_slice(&key).unwrap();
@@ -16,8 +15,6 @@ mod test {
         aes.encrypt_block(&mut block);
         block.into()
     }
-
-
 
     fn test_vs_aes(encrypt_fn: fn(key: Key, block: Block, rounds: usize) -> Block) {
         let seed: [u8; 32] = Default::default();
@@ -32,7 +29,10 @@ mod test {
         assert_eq!(encrypted, encrypt_aes_lib(key, block));
     }
 
-    fn test_vs_plain(encrypt_fn: fn(key: Key, block: Block, rounds: usize) -> Block, rounds: usize) {
+    fn test_vs_plain(
+        encrypt_fn: fn(key: Key, block: Block, rounds: usize) -> Block,
+        rounds: usize,
+    ) {
         let seed: [u8; 32] = Default::default();
         let mut rng = ChaCha20Rng::from_seed(seed);
         let mut key: Key = Default::default();
@@ -52,7 +52,7 @@ mod test {
 
     #[test]
     fn test_plain2() {
-        test_vs_aes(plain2::encrypt_single_block);
+        test_vs_aes(plain::encrypt_single_block);
     }
 
     #[test]

@@ -1,5 +1,5 @@
-use std::convert::AsMut;
 use crate::{Block, Key};
+use std::convert::AsMut;
 
 static SBOX: [[u8; 16]; 16] = [
     [

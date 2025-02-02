@@ -24,6 +24,8 @@ static RC: [u8; 11] = [
     0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36,
 ];
 
+// type State = [[u8; 4]; 4];
+
 /// State of 4 rows each of 4 bytes
 #[derive(Debug, Default)]
 struct State([Word; 4]);
@@ -53,12 +55,12 @@ impl State {
         self.0.iter_mut()
     }
 
-    pub fn column(&self, j: usize) -> Word {
-        let mut col: Word = Default::default();
-        for i in 0..4 {
-            col.0[i] = self.0[i][j];
-        }
-        col
+    pub fn column(&self, j: usize) -> ColumnView<'_> {
+        ColumnView(j, &self.0)
+    }
+
+    pub fn column_mut(&mut self, j: usize) -> ColumnViewMut<'_> {
+        ColumnViewMut(j, &mut self.0)
     }
 }
 
@@ -84,12 +86,48 @@ impl IndexMut<usize> for State {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct ColumnView<'a>(usize, &'a [Word; 4]);
+
+impl<'a> ColumnView<'a> {
+    fn to_word(&self) -> Word {
+        let mut col: Word = Default::default();
+        for i in 0..4 {
+            col.0[i] = self.1[i][self.0];
+        }
+        col
+    }
+}
+
+#[derive(Debug)]
+pub struct ColumnViewMut<'a>(usize, &'a mut [Word; 4]);
+
+impl<'a> ColumnViewMut<'a> {
+    pub fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
+        (0..4).map(|i| self.1[i][self.0])
+    }
+
+    pub fn bytes_mut(&mut self) -> impl Iterator<Item = &'_ mut u8> + '_ {
+        self.1.iter_mut().map(|row| &mut row[self.0])
+    }
+
+    pub fn bitxor_assign(&mut self, rhs: Word) {
+        for (byte, rhs_byte) in self.bytes_mut().zip(rhs.bytes()) {
+            *byte ^= rhs_byte;
+        }
+    }
+}
+
 #[derive(Debug, Default, Copy, Clone)]
 pub struct Word([u8; 4]);
 
 impl Word {
     pub const fn zero() -> Self {
         Self([0; 4])
+    }
+
+    pub fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
+        self.0.iter().copied()
     }
 
     pub fn bytes_mut(&mut self) -> impl Iterator<Item = &mut u8> {
@@ -104,7 +142,7 @@ impl Word {
 
 impl BitXorAssign for Word {
     fn bitxor_assign(&mut self, rhs: Self) {
-        for (byte, rhs_byte) in self.0.iter_mut().zip(rhs.0.iter()) {
+        for (byte, rhs_byte) in self.bytes_mut().zip(rhs.bytes()) {
             *byte ^= rhs_byte;
         }
     }
@@ -135,6 +173,12 @@ impl IndexMut<usize> for Word {
 
 fn substitute(byte: u8) -> u8 {
     SBOX[byte as usize]
+}
+
+fn xor_state(state: &mut State, key: &[Word; 4]) {
+    for j in 0..4 {
+        state.column_mut(j).bitxor_assign(key[j]);
+    }
 }
 
 fn sub_bytes(state: &mut State) {
@@ -168,7 +212,7 @@ fn gf_256_mul(mut a: u8, mut b: u8) -> u8 {
 
 fn mix_columns(state: &mut State) {
     for j in 0..4 {
-        let col = state.column(j);
+        let col = state.column(j).to_word();
 
         state[0][j] = gf_256_mul(col[0], 2)
             ^ gf_256_mul(col[3], 1)
@@ -189,23 +233,32 @@ fn mix_columns(state: &mut State) {
     }
 }
 
-pub fn encrypt_block(expanded_key: &[Word; 44], block: Block, rounds: usize) -> Block {
+pub fn encrypt_block(expanded_key: &[Word; 44], mut block: Block, rounds: usize) -> Block {
     let mut state = State::from_array(&block);
 
-    state ^= expanded_key[0..4].try_into().expect("array length 4");
+    xor_state(
+        &mut state,
+        expanded_key[0..4].try_into().expect("array length 4"),
+    );
 
     for i in 1..rounds {
         sub_bytes(&mut state);
         shift_rows(&mut state);
         mix_columns(&mut state);
-        state ^= expanded_key[i * 4..(i + 1) * 4]
-            .try_into()
-            .expect("array length 4");
+        xor_state(
+            &mut state,
+            expanded_key[i * 4..(i + 1) * 4]
+                .try_into()
+                .expect("array length 4"),
+        );
     }
 
     sub_bytes(&mut state);
     shift_rows(&mut state);
-    state ^= expanded_key[40..44].try_into().expect("array length 4");
+    xor_state(
+        &mut state,
+        expanded_key[40..44].try_into().expect("array length 4"),
+    );
 
     state.to_array()
 }
@@ -250,5 +303,4 @@ fn sub_word(mut word: Word) -> Word {
 pub fn encrypt_single_block(key: Key, block: Block, rounds: usize) -> Block {
     let key_schedule = key_schedule(&key);
     encrypt_block(&key_schedule, block, rounds)
-
 }
