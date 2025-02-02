@@ -1,5 +1,6 @@
 pub mod plain;
 pub mod boolean;
+pub mod plain2;
 
 #[cfg(test)]
 mod test {
@@ -7,7 +8,7 @@ mod test {
     use aes::cipher::{BlockEncrypt, KeyInit};
     use rand::{Rng, SeedableRng};
     use rand_chacha::ChaCha20Rng;
-    use crate::impls::{boolean, plain};
+    use crate::impls::{boolean, plain, plain2};
 
     fn encrypt_aes_lib(key: Key, block: Block) -> Block {
         let aes = aes::Aes128::new_from_slice(&key).unwrap();
@@ -47,6 +48,11 @@ mod test {
     #[test]
     fn test_plain() {
         test_vs_aes(plain::encrypt_single_block);
+    }
+
+    #[test]
+    fn test_plain2() {
+        test_vs_aes(plain2::encrypt_single_block);
     }
 
     #[test]
