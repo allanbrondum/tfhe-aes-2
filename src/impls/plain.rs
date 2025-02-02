@@ -249,6 +249,6 @@ fn sub_word(mut word: Word) -> Word {
 
 pub fn encrypt_single_block(key: Key, block: Block, rounds: usize) -> Block {
     let key_schedule = key_schedule(&key);
-    let encrypted = encrypt_block(&key_schedule, block, rounds);
-    encrypted
+    encrypt_block(&key_schedule, block, rounds)
+
 }
