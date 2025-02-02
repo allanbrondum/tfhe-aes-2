@@ -1,8 +1,16 @@
+mod fhe_model;
 mod model;
 
-use crate::impls::boolean::model::{BoolByte, State, Word};
+use crate::impls::tfhe_boolean::fhe_model::{BlockFhe, BoolByteFhe, BoolFhe, StateFhe, WordFhe};
+use crate::impls::tfhe_boolean::model::{BoolByte, State, Word};
 use crate::{Block, Key};
+use rayon::iter::IntoParallelRefIterator;
+use rayon::iter::ParallelIterator;
+use std::fmt::{Debug, Formatter};
 use std::ops::{BitXor, BitXorAssign, Index, IndexMut};
+use std::sync::Arc;
+use std::time::Instant;
+use tfhe::boolean;
 
 static SBOX: [u8; 256] = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -26,7 +34,6 @@ static SBOX: [u8; 256] = [
 static RC: [u8; 11] = [
     0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36,
 ];
-
 
 fn substitute(byte: BoolByte) -> BoolByte {
     SBOX[u8::from(byte) as usize].into()
@@ -91,8 +98,13 @@ fn mix_columns(state: &mut State) {
     }
 }
 
-pub fn encrypt_block(expanded_key: &[Word; 44], block: Block, rounds: usize) -> Block {
-    let mut state = State::from_array(&block);
+pub fn encrypt_block(context: &FheContext, expanded_key_fhe: &[WordFhe; 44], block: BlockFhe, rounds: usize) -> BlockFhe {
+    let mut state_fhe = StateFhe::from_array(block);
+
+    let expanded_key =
+        fhe_model::fhe_decrypt_word_array(&context.client_key, &expanded_key_fhe);
+
+    let mut state= fhe_model::fhe_decrypt_state(context, state_fhe);
 
     xor_state(
         &mut state,
@@ -118,7 +130,9 @@ pub fn encrypt_block(expanded_key: &[Word; 44], block: Block, rounds: usize) -> 
         expanded_key[40..44].try_into().expect("array length 4"),
     );
 
-    state.to_array()
+    let state_fhe = fhe_model::fhe_encrypt_state(context, state);
+
+    state_fhe.into_array()
 }
 
 pub fn key_schedule(key_slice: &Key) -> [Word; 44] {
@@ -157,13 +171,47 @@ fn sub_word(mut word: Word) -> Word {
 }
 
 pub fn encrypt_single_block(key: Key, block: Block, rounds: usize) -> Block {
+    let (client_key, server_key) = boolean::gen_keys();
+
+    let context = FheContext {
+        client_key: client_key.into(),
+        server_key: server_key.into(),
+    };
+
+    let key_fhe = fhe_model::fhe_encrypt_byte_array(&context.client_key, &context, &key);
+    let block_fhe = fhe_model::fhe_encrypt_byte_array(&context.client_key, &context, &block);
+
+    let start = Instant::now();
+
     let key_schedule = key_schedule(&key);
-    encrypt_block(&key_schedule, block, rounds)
+
+    let key_schedule_fhe =
+        fhe_model::fhe_encrypt_word_array(&context.client_key, &context, &key_schedule);
+
+    println!("key schedule created {:?}", start.elapsed());
+
+    let encrypted = encrypt_block(&context, &key_schedule_fhe, block_fhe, rounds);
+
+    println!("block encrypted (rounds: {}) {:?}", rounds, start.elapsed());
+
+    fhe_model::fhe_decrypt_byte_array(&context.client_key, &encrypted)
+}
+
+#[derive(Clone)]
+struct FheContext {
+    client_key: Arc<boolean::client_key::ClientKey>,
+    server_key: Arc<boolean::server_key::ServerKey>,
+}
+
+impl Debug for FheContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FheContext").finish()
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::impls::boolean::BoolByte;
+    use crate::impls::tfhe_boolean::model::BoolByte;
 
     #[test]
     fn test_bool_byte() {

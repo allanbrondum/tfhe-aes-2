@@ -1,9 +1,10 @@
 pub mod boolean;
+pub mod tfhe_boolean;
 pub mod plain;
 
 #[cfg(test)]
 mod test {
-    use crate::impls::{boolean, plain};
+    use crate::impls::{boolean, plain, tfhe_boolean};
     use crate::{Block, Key, ROUNDS};
     use aes::cipher::{BlockEncrypt, KeyInit};
     use rand::{Rng, SeedableRng};
@@ -58,5 +59,10 @@ mod test {
     #[test]
     fn test_boolean() {
         test_vs_plain(boolean::encrypt_single_block, 2);
+    }
+
+    #[test]
+    fn test_tfhe_boolean() {
+        test_vs_plain(tfhe_boolean::encrypt_single_block, 2);
     }
 }

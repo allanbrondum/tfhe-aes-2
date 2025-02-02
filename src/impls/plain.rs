@@ -1,5 +1,8 @@
+mod model;
+
 use crate::{Block, Key};
 use std::ops::{BitXor, BitXorAssign, Index, IndexMut};
+use crate::impls::plain::model::{State, Word};
 
 static SBOX: [u8; 256] = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -24,152 +27,7 @@ static RC: [u8; 11] = [
     0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36,
 ];
 
-// type State = [[u8; 4]; 4];
 
-/// State of 4 rows each of 4 bytes
-#[derive(Debug, Default)]
-struct State([Word; 4]);
-
-impl State {
-    pub fn from_array(block: &[u8; 16]) -> Self {
-        let mut this = Self::default();
-        for i in 0..16 {
-            this[i % 4][i / 4] = block[i];
-        }
-        this
-    }
-
-    pub fn to_array(&self) -> [u8; 16] {
-        let mut array: [u8; 16] = Default::default();
-        for i in 0..16 {
-            array[i] = self[i % 4][i / 4];
-        }
-        array
-    }
-
-    pub fn bytes_mut(&mut self) -> impl Iterator<Item = &mut u8> {
-        self.0.iter_mut().flat_map(|w| w.0.iter_mut())
-    }
-
-    pub fn rows_mut(&mut self) -> impl Iterator<Item = &mut Word> {
-        self.0.iter_mut()
-    }
-
-    pub fn column(&self, j: usize) -> ColumnView<'_> {
-        ColumnView(j, &self.0)
-    }
-
-    pub fn column_mut(&mut self, j: usize) -> ColumnViewMut<'_> {
-        ColumnViewMut(j, &mut self.0)
-    }
-}
-
-impl BitXorAssign<&[Word; 4]> for State {
-    fn bitxor_assign(&mut self, rhs: &[Word; 4]) {
-        for (word, rhs_word) in self.0.iter_mut().zip(rhs.iter()) {
-            *word ^= *rhs_word;
-        }
-    }
-}
-
-impl Index<usize> for State {
-    type Output = Word;
-
-    fn index(&self, row: usize) -> &Self::Output {
-        &self.0[row]
-    }
-}
-
-impl IndexMut<usize> for State {
-    fn index_mut(&mut self, row: usize) -> &mut Self::Output {
-        &mut self.0[row]
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct ColumnView<'a>(usize, &'a [Word; 4]);
-
-impl<'a> ColumnView<'a> {
-    fn to_word(&self) -> Word {
-        let mut col: Word = Default::default();
-        for i in 0..4 {
-            col.0[i] = self.1[i][self.0];
-        }
-        col
-    }
-}
-
-#[derive(Debug)]
-pub struct ColumnViewMut<'a>(usize, &'a mut [Word; 4]);
-
-impl<'a> ColumnViewMut<'a> {
-    pub fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
-        (0..4).map(|i| self.1[i][self.0])
-    }
-
-    pub fn bytes_mut(&mut self) -> impl Iterator<Item = &'_ mut u8> + '_ {
-        self.1.iter_mut().map(|row| &mut row[self.0])
-    }
-
-    pub fn bitxor_assign(&mut self, rhs: Word) {
-        for (byte, rhs_byte) in self.bytes_mut().zip(rhs.bytes()) {
-            *byte ^= rhs_byte;
-        }
-    }
-}
-
-#[derive(Debug, Default, Copy, Clone)]
-pub struct Word([u8; 4]);
-
-impl Word {
-    pub const fn zero() -> Self {
-        Self([0; 4])
-    }
-
-    pub fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
-        self.0.iter().copied()
-    }
-
-    pub fn bytes_mut(&mut self) -> impl Iterator<Item = &mut u8> {
-        self.0.iter_mut()
-    }
-
-    pub fn rotate_left(mut self, mid: usize) -> Self {
-        self.0.rotate_left(mid);
-        self
-    }
-}
-
-impl BitXorAssign for Word {
-    fn bitxor_assign(&mut self, rhs: Self) {
-        for (byte, rhs_byte) in self.bytes_mut().zip(rhs.bytes()) {
-            *byte ^= rhs_byte;
-        }
-    }
-}
-
-impl BitXor for Word {
-    type Output = Word;
-
-    fn bitxor(mut self, rhs: Self) -> Self::Output {
-        self.bitxor_assign(rhs);
-        self
-    }
-}
-
-impl Index<usize> for Word {
-    type Output = u8;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.0[index]
-    }
-}
-
-impl IndexMut<usize> for Word {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.0[index]
-    }
-}
 
 fn substitute(byte: u8) -> u8 {
     SBOX[byte as usize]
