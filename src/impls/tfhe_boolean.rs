@@ -45,6 +45,13 @@ fn xor_state(state: &mut State, key: &[Word; 4]) {
     }
 }
 
+fn xor_state_fhe(state: &mut StateFhe, key: &[WordFhe; 4]) {
+    for j in 0..4 {
+        state.column_mut(j).bitxor_assign(&key[j]);
+    }
+}
+
+
 fn sub_bytes(state: &mut State) {
     for byte in state.bytes_mut() {
         *byte = substitute(*byte);
@@ -104,12 +111,14 @@ pub fn encrypt_block(context: &FheContext, expanded_key_fhe: &[WordFhe; 44], blo
     let expanded_key =
         fhe_model::fhe_decrypt_word_array(&context.client_key, &expanded_key_fhe);
 
-    let mut state= fhe_model::fhe_decrypt_state(context, state_fhe);
 
-    xor_state(
-        &mut state,
-        expanded_key[0..4].try_into().expect("array length 4"),
+
+    xor_state_fhe(
+        &mut state_fhe,
+        expanded_key_fhe[0..4].try_into().expect("array length 4"),
     );
+
+    let mut state= fhe_model::fhe_decrypt_state(context, state_fhe);
 
     for i in 1..rounds {
         sub_bytes(&mut state);

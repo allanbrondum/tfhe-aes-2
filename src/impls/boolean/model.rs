@@ -98,13 +98,13 @@ impl State {
     }
 }
 
-impl BitXorAssign<&[Word; 4]> for State {
-    fn bitxor_assign(&mut self, rhs: &[Word; 4]) {
-        for (word, rhs_word) in self.0.iter_mut().zip(rhs.iter()) {
-            *word ^= *rhs_word;
-        }
-    }
-}
+// impl BitXorAssign<&[Word; 4]> for State {
+//     fn bitxor_assign(&mut self, rhs: &[Word; 4]) {
+//         for (word, rhs_word) in self.0.iter_mut().zip(rhs.iter()) {
+//             *word ^= *rhs_word;
+//         }
+//     }
+// }
 
 impl Index<usize> for State {
     type Output = Word;

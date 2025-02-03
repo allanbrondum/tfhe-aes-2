@@ -2,8 +2,9 @@ use crate::impls::tfhe_boolean::model::{BoolByte, State, Word};
 use crate::impls::tfhe_boolean::FheContext;
 use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
-use std::ops::{Index, IndexMut};
+use std::ops::{BitXorAssign, Index, IndexMut};
 use tfhe::boolean;
+use tfhe::boolean::server_key::{BinaryBooleanGates, BinaryBooleanGatesAssign};
 
 pub type BlockFhe = [BoolByteFhe; 16];
 
@@ -25,6 +26,12 @@ impl BoolFhe {
 impl Default for BoolFhe {
     fn default() -> Self {
         Self::const_false()
+    }
+}
+
+impl BitXorAssign<&BoolFhe> for BoolFhe {
+    fn bitxor_assign(&mut self, rhs: &Self) {
+        self.context.as_ref().expect("conext").server_key.xor_assign(&mut self.fhe, &rhs.fhe);
     }
 }
 
@@ -50,6 +57,16 @@ impl IndexMut<usize> for BoolByteFhe {
         &mut self.0[index]
     }
 }
+
+
+impl BitXorAssign<&BoolByteFhe> for BoolByteFhe {
+    fn bitxor_assign(&mut self, rhs: &Self) {
+        for (b, rhs_b) in self.0.iter_mut().zip(rhs.0.iter()) {
+            *b ^= rhs_b;
+        }
+    }
+}
+
 
 /// State of 4 rows each of 4 bytes
 #[derive(Debug, Default)]
@@ -138,11 +155,11 @@ impl<'a> ColumnViewMutFhe<'a> {
         self.1.iter_mut().map(|row| &mut row[self.0])
     }
 
-    // pub fn bitxor_assign(&mut self, rhs: WordFhe) {
-    //     for (byte, rhs_byte) in self.bytes_mut().zip(rhs.bytes()) {
-    //         *byte ^= rhs_byte;
-    //     }
-    // }
+    pub fn bitxor_assign(&mut self, rhs: &WordFhe) {
+        for (byte, rhs_byte) in self.bytes_mut().zip(rhs.bytes()) {
+            *byte ^= rhs_byte;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -180,6 +197,15 @@ impl IndexMut<usize> for WordFhe {
         &mut self.0[index]
     }
 }
+
+impl BitXorAssign for WordFhe {
+    fn bitxor_assign(&mut self, rhs: Self) {
+        for (byte, rhs_byte) in self.bytes_mut().zip(rhs.bytes()) {
+            *byte ^= rhs_byte;
+        }
+    }
+}
+
 
 pub fn fhe_encrypt_word_array<const N: usize>(
     client_key: &boolean::client_key::ClientKey,
