@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tfhe = { version = "0.11.2", features = ["boolean", "shortint", "integer", "noise-asserts"] }
+tfhe = { version = "0.11.2", features = ["boolean", "shortint", "integer", "noise-asserts", "experimental"] }
 rand = "0.9.0"
 rand_chacha = "0.9.0"
 aes = "0.8.4"
