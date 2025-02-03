@@ -4,8 +4,8 @@ mod model;
 use crate::impls::tfhe_boolean::fhe_model::{BlockFhe, BoolByteFhe, BoolFhe, StateFhe, WordFhe};
 use crate::impls::tfhe_boolean::model::{BoolByte, State, Word};
 use crate::{Block, Key};
-use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
+use rayon::iter::{IntoParallelRefIterator, ParallelBridge};
 use std::fmt::{Debug, Formatter};
 use std::ops::{BitXor, BitXorAssign, Index, IndexMut};
 use std::sync::Arc;
@@ -81,27 +81,39 @@ fn gf_256_mul(context: &FheContext, a: &BoolByteFhe, mut b: u8) -> BoolByteFhe {
 fn mix_columns(context: &FheContext, state: &mut StateFhe) {
     let mut new_state = StateFhe::default();
 
-    for (j, column) in state.columns().enumerate() {
+    let new_columns: [[BoolByteFhe; 4]; 4] = state
+        .columns()
+        .collect::<Vec<_>>()
+        .par_iter()
+        .map(|column| {
+            let mut new_column: [BoolByteFhe; 4] = Default::default();
+            new_column[0] = gf_256_mul(context, &column[0], 2)
+                ^ gf_256_mul(context, &column[3], 1)
+                ^ gf_256_mul(context, &column[2], 1)
+                ^ gf_256_mul(context, &column[1], 3);
+            new_column[1] = gf_256_mul(context, &column[1], 2)
+                ^ gf_256_mul(context, &column[0], 1)
+                ^ gf_256_mul(context, &column[3], 1)
+                ^ gf_256_mul(context, &column[2], 3);
+            new_column[2] = gf_256_mul(context, &column[2], 2)
+                ^ gf_256_mul(context, &column[1], 1)
+                ^ gf_256_mul(context, &column[0], 1)
+                ^ gf_256_mul(context, &column[3], 3);
+            new_column[3] = gf_256_mul(context, &column[3], 2)
+                ^ gf_256_mul(context, &column[2], 1)
+                ^ gf_256_mul(context, &column[1], 1)
+                ^ gf_256_mul(context, &column[0], 3);
+            new_column
+        })
+        .collect::<Vec<_>>()
+        .try_into()
+        .expect("array length 4");
 
-        new_state[0][j] = gf_256_mul(context, &column[0], 2)
-            ^ gf_256_mul(context, &column[3], 1)
-            ^ gf_256_mul(context, &column[2], 1)
-            ^ gf_256_mul(context, &column[1], 3);
-        new_state[1][j] = gf_256_mul(context, &column[1], 2)
-            ^ gf_256_mul(context, &column[0], 1)
-            ^ gf_256_mul(context, &column[3], 1)
-            ^ gf_256_mul(context, &column[2], 3);
-        new_state[2][j] = gf_256_mul(context, &column[2], 2)
-            ^ gf_256_mul(context, &column[1], 1)
-            ^ gf_256_mul(context, &column[0], 1)
-            ^ gf_256_mul(context, &column[3], 3);
-        new_state[3][j] = gf_256_mul(context, &column[3], 2)
-            ^ gf_256_mul(context, &column[2], 1)
-            ^ gf_256_mul(context, &column[1], 1)
-            ^ gf_256_mul(context, &column[0], 3);
+    for (j, column) in new_columns.into_iter().enumerate() {
+        for (i, byte) in column.into_iter().enumerate() {
+            state[i][j] = byte;
+        }
     }
-
-    *state = new_state;
 }
 
 pub fn encrypt_block(

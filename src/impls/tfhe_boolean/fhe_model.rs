@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Formatter};
 use crate::impls::tfhe_boolean::model::{BoolByte, State, Word};
 use crate::impls::tfhe_boolean::FheContext;
 use rayon::iter::ParallelIterator;
@@ -8,10 +9,16 @@ use tfhe::boolean::server_key::{BinaryBooleanGates, BinaryBooleanGatesAssign};
 
 pub type BlockFhe = [BoolByteFhe; 16];
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct BoolFhe {
     fhe: boolean::ciphertext::Ciphertext,
     context: Option<FheContext>,
+}
+
+impl Debug for BoolFhe {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BoolFhe").field("fhe", &self.fhe).finish()
+    }
 }
 
 impl BoolFhe {
@@ -153,6 +160,10 @@ impl IndexMut<usize> for StateFhe {
 pub struct ColumnViewFhe<'a>(usize, &'a [WordFhe; 4]);
 
 impl<'a> ColumnViewFhe<'a> {
+    pub fn bytes(&self) -> impl Iterator<Item = &BoolByteFhe> + '_ {
+        (0..4).map(|i| &self.1[i][self.0])
+    }
+
     pub fn clone_to_word(&self) -> WordFhe {
         let mut col: WordFhe = Default::default();
         for i in 0..4 {
