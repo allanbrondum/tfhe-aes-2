@@ -10,7 +10,8 @@ use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelBridge}
 use rayon::iter::{Map, ParallelIterator};
 use rayon::slice::Iter;
 use std::fmt::{Debug, Formatter};
-use std::ops::{BitXor, BitXorAssign, Index, IndexMut};
+use std::mem;
+use std::ops::{BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
 use std::sync::Arc;
 use std::time::Instant;
 use tfhe::boolean;
@@ -62,6 +63,27 @@ fn shift_rows(state: &mut StateFhe) {
 
 /// Multiplication in F_2[X]/(X^8 + X^4 + X^3 + X + 1)
 fn gf_256_mul(context: &FheContext, a: &BoolByteFhe, mut b: u8) -> BoolByteFhe {
+    let mut a = a.clone();
+    let mut res = BoolByteFhe::default();
+    for _ in 0..8 {
+        if b & 1 == 1 {
+            res ^= &a;
+        }
+        let reduce_x8 = a.shl_assign_1();
+
+        a[3] ^= &reduce_x8;
+        a[4] ^= &reduce_x8;
+        a[6] ^= &reduce_x8;
+        a[7] ^= &reduce_x8;
+
+        b >>= 1;
+    }
+
+    res
+}
+
+/// Multiplication in F_2[X]/(X^8 + X^4 + X^3 + X + 1)
+fn gf_256_mul_plain(context: &FheContext, a: &BoolByteFhe, mut b: u8) -> BoolByteFhe {
     let a = fhe_model::fhe_decrypt_byte(&context.client_key, &a);
     let mut a = u8::from(a);
 
@@ -70,11 +92,18 @@ fn gf_256_mul(context: &FheContext, a: &BoolByteFhe, mut b: u8) -> BoolByteFhe {
         if b & 1 == 1 {
             res ^= a
         }
-        let high_bit = a & 0x80;
-        a <<= 1;
-        if high_bit != 0x80 {
-            a ^= 0x1b;
-        }
+
+        let mut a_bits = BoolByte::from(a);
+
+        let reduce_x8 = a_bits.shl_assign_1();
+
+        a_bits[3] ^= reduce_x8;
+        a_bits[4] ^= reduce_x8;
+        a_bits[6] ^= reduce_x8;
+        a_bits[7] ^= reduce_x8;
+
+        a = u8::from(a_bits);
+
         b >>= 1;
     }
 
@@ -228,13 +257,39 @@ fn collect_array<const N: usize, T: Send + Sync + Debug>(
         .expect("array length")
 }
 
+fn shl_array<const N: usize, T: Default>(array: &mut [T; N], shl: usize) {
+    for i in 0..N {
+        if i + shl < N {
+            array[i] = mem::take(&mut array[i + shl]);
+        } else {
+            array[i] = T::default();
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::impls::tfhe_boolean::model::BoolByte;
+    use crate::impls::tfhe_boolean::shl_array;
 
     #[test]
     fn test_bool_byte() {
         let byte = 0x12;
         assert_eq!(u8::from(BoolByte::from(byte)), byte);
+    }
+
+    #[test]
+    fn test_shl_array() {
+        let mut array = [3, 4, 5, 6];
+        shl_array(&mut array, 2);
+        assert_eq!(array, [5, 6, 0, 0]);
+
+        let mut array = [3, 4, 5, 6];
+        shl_array(&mut array, 0);
+        assert_eq!(array, [3, 4, 5, 6]);
+
+        let mut array = [3, 4, 5, 6];
+        shl_array(&mut array, 5);
+        assert_eq!(array, [0, 0, 0, 0]);
     }
 }

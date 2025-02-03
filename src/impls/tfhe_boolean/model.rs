@@ -1,4 +1,4 @@
-use std::ops::{BitXor, BitXorAssign, Index, IndexMut};
+use std::ops::{BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
 
 #[derive(Debug, Default, Copy, Clone)]
 pub struct BoolByte(pub [bool; 8]);
@@ -6,6 +6,12 @@ pub struct BoolByte(pub [bool; 8]);
 impl BoolByte {
     const fn zero() -> Self {
         Self([false; 8])
+    }
+
+    pub fn shl_assign_1(&mut self) -> bool {
+        let ret = self.0[0];
+        self.shl_assign(1);
+        ret
     }
 }
 
@@ -20,6 +26,12 @@ impl Index<usize> for BoolByte {
 impl IndexMut<usize> for BoolByte {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.0[index]
+    }
+}
+
+impl ShlAssign<usize> for BoolByte {
+    fn shl_assign(&mut self, rhs: usize) {
+        super::shl_array(&mut self.0, rhs);
     }
 }
 
@@ -59,7 +71,6 @@ impl From<BoolByte> for u8 {
         byte
     }
 }
-
 
 #[derive(Debug, Default, Copy, Clone)]
 pub struct Word(pub [BoolByte; 4]);

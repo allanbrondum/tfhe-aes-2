@@ -1,9 +1,10 @@
-use std::fmt::{Debug, Formatter};
 use crate::impls::tfhe_boolean::model::{BoolByte, State, Word};
 use crate::impls::tfhe_boolean::FheContext;
 use rayon::iter::ParallelIterator;
 use rayon::iter::{IntoParallelRefIterator, ParallelBridge};
-use std::ops::{BitXor, BitXorAssign, Index, IndexMut};
+use std::fmt::{Debug, Formatter};
+use std::mem;
+use std::ops::{BitAnd, BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
 use tfhe::boolean;
 use tfhe::boolean::server_key::{BinaryBooleanGates, BinaryBooleanGatesAssign};
 
@@ -15,43 +16,98 @@ pub struct BoolFhe {
     context: Option<FheContext>,
 }
 
-impl Debug for BoolFhe {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BoolFhe").field("fhe", &self.fhe).finish()
-    }
-}
-
 impl BoolFhe {
-    const fn const_false() -> Self {
+    pub fn new(fhe: boolean::ciphertext::Ciphertext, context: FheContext) -> Self {
         Self {
-            fhe: boolean::ciphertext::Ciphertext::Trivial(false),
+            fhe,
+            context: Some(context),
+        }
+    }
+
+    pub const fn trivial(b: bool) -> Self {
+        Self {
+            fhe: boolean::ciphertext::Ciphertext::Trivial(b),
             context: None,
         }
+    }
+
+    // pub fn mux(&self, then: &Self, r#else: &Self) -> Self {
+    //     if let Some(context) = self.context.as_ref() {
+    //         BoolFhe::new(
+    //             context.server_key.mux(&self.fhe, &then.fhe, &r#else.fhe),
+    //             context.clone(),
+    //         )
+    //     } else if let boolean::ciphertext::Ciphertext::Trivial(this) = &self.fhe {
+    //         if *this {
+    //             then.clone()
+    //         } else {
+    //             r#else.clone()
+    //         }
+    //     } else {
+    //         panic!("no fhe context and non-trivial operands");
+    //     }
+    // }
+}
+
+impl Debug for BoolFhe {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BoolFhe").field("fhe", &self.fhe).field("context", &self.context.as_ref().map(|_|())).finish()
     }
 }
 
 impl Default for BoolFhe {
     fn default() -> Self {
-        Self::const_false()
+        Self::trivial(false)
     }
 }
 
 impl BitXorAssign<&BoolFhe> for BoolFhe {
     fn bitxor_assign(&mut self, rhs: &Self) {
-        self.context
-            .as_ref()
-            .expect("conext")
-            .server_key
-            .xor_assign(&mut self.fhe, &rhs.fhe);
+        if let Some(context) = self.context.as_ref().or(rhs.context.as_ref()) {
+            context.server_key.xor_assign(&mut self.fhe, &rhs.fhe);
+            self.context = Some(context.clone());
+        } else if let (
+            boolean::ciphertext::Ciphertext::Trivial(this),
+            boolean::ciphertext::Ciphertext::Trivial(rhs),
+        ) = (&mut self.fhe, &rhs.fhe)
+        {
+            this.bitxor_assign(rhs);
+        } else {
+            panic!("no fhe context and non-trivial operands {:?} {:?}", self, rhs);
+        }
     }
 }
+
+// impl BitAnd<BoolFhe> for &BoolFhe {
+//     type Output = BoolFhe;
+//
+//     fn bitand(self, rhs: BoolFhe) -> Self::Output {
+//         if let Some(context) = self.context.as_ref().or(rhs.context.as_ref()) {
+//             BoolFhe::new(context.server_key.and(&self.fhe, &rhs.fhe), context.clone())
+//         } else if let (
+//             boolean::ciphertext::Ciphertext::Trivial(this),
+//             boolean::ciphertext::Ciphertext::Trivial(rhs),
+//         ) = (&self.fhe, &rhs.fhe)
+//         {
+//             BoolFhe::trivial(this.bitand(rhs))
+//         } else {
+//             panic!("no fhe context and non-trivial operands");
+//         }
+//     }
+// }
 
 #[derive(Debug, Clone, Default)]
 pub struct BoolByteFhe([BoolFhe; 8]);
 
 impl BoolByteFhe {
-    const fn zero() -> Self {
-        Self([const { BoolFhe::const_false() }; 8])
+    pub const fn zero() -> Self {
+        Self([const { BoolFhe::trivial(false) }; 8])
+    }
+
+    pub fn shl_assign_1(&mut self) -> BoolFhe {
+        let ret = mem::take(&mut self.0[0]);
+        self.shl_assign(1);
+        ret
     }
 }
 
@@ -66,6 +122,12 @@ impl Index<usize> for BoolByteFhe {
 impl IndexMut<usize> for BoolByteFhe {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.0[index]
+    }
+}
+
+impl ShlAssign<usize> for BoolByteFhe {
+    fn shl_assign(&mut self, rhs: usize) {
+        super::shl_array(&mut self.0, rhs);
     }
 }
 
@@ -122,7 +184,7 @@ impl StateFhe {
     }
 
     pub fn columns(&self) -> impl Iterator<Item = ColumnViewFhe<'_>> {
-        (0..4).map(|j|ColumnViewFhe(j, &self.0))
+        (0..4).map(|j| ColumnViewFhe(j, &self.0))
     }
 
     pub fn column(&self, j: usize) -> ColumnViewFhe<'_> {
@@ -133,14 +195,6 @@ impl StateFhe {
         ColumnViewMutFhe(j, &mut self.0)
     }
 }
-
-// impl BitXorAssign<&[Word; 4]> for StateFhe {
-//     fn bitxor_assign(&mut self, rhs: &[Word; 4]) {
-//         for (word, rhs_word) in self.0.iter_mut().zip(rhs.iter()) {
-//             *word ^= *rhs_word;
-//         }
-//     }
-// }
 
 impl Index<usize> for StateFhe {
     type Output = WordFhe;
@@ -180,7 +234,6 @@ impl<'a> Index<usize> for ColumnViewFhe<'a> {
         &self.1[row][self.0]
     }
 }
-
 
 #[derive(Debug)]
 pub struct ColumnViewMutFhe<'a>(usize, &'a mut [WordFhe; 4]);
@@ -222,7 +275,7 @@ impl WordFhe {
         self.0.iter()
     }
 
-    pub fn into_bytes(self) -> impl Iterator<Item = BoolByteFhe>  {
+    pub fn into_bytes(self) -> impl Iterator<Item = BoolByteFhe> {
         self.0.into_iter()
     }
 
@@ -324,10 +377,7 @@ pub fn fhe_encrypt_bool(
     context: &FheContext,
     b: bool,
 ) -> BoolFhe {
-    BoolFhe {
-        fhe: client_key.encrypt(b),
-        context: Some(context.clone()),
-    }
+    BoolFhe::new(client_key.encrypt(b), context.clone())
 }
 
 pub fn fhe_decrypt_word_array<const N: usize>(
