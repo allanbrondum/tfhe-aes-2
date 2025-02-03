@@ -179,8 +179,12 @@ impl WordFhe {
     }
 
     pub fn rotate_left(mut self, mid: usize) -> Self {
-        self.0.rotate_left(mid);
+        self.rotate_left_assign(mid);
         self
+    }
+
+    pub fn rotate_left_assign(&mut self, mid: usize) {
+        self.0.rotate_left(mid);
     }
 }
 

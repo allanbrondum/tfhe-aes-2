@@ -39,18 +39,11 @@ fn substitute(byte: BoolByte) -> BoolByte {
     SBOX[u8::from(byte) as usize].into()
 }
 
-fn xor_state(state: &mut State, key: &[Word; 4]) {
-    for j in 0..4 {
-        state.column_mut(j).bitxor_assign(key[j]);
-    }
-}
-
-fn xor_state_fhe(state: &mut StateFhe, key: &[WordFhe; 4]) {
+fn xor_state(state: &mut StateFhe, key: &[WordFhe; 4]) {
     for j in 0..4 {
         state.column_mut(j).bitxor_assign(&key[j]);
     }
 }
-
 
 fn sub_bytes(state: &mut State) {
     for byte in state.bytes_mut() {
@@ -58,9 +51,9 @@ fn sub_bytes(state: &mut State) {
     }
 }
 
-fn shift_rows(state: &mut State) {
+fn shift_rows(state: &mut StateFhe) {
     for (i, row) in state.rows_mut().enumerate() {
-        *row = row.rotate_left(i);
+        row.rotate_left_assign(i);
     }
 }
 
@@ -105,41 +98,58 @@ fn mix_columns(state: &mut State) {
     }
 }
 
-pub fn encrypt_block(context: &FheContext, expanded_key_fhe: &[WordFhe; 44], block: BlockFhe, rounds: usize) -> BlockFhe {
+pub fn encrypt_block(
+    context: &FheContext,
+    expanded_key_fhe: &[WordFhe; 44],
+    block: BlockFhe,
+    rounds: usize,
+) -> BlockFhe {
     let mut state_fhe = StateFhe::from_array(block);
 
-    let expanded_key =
-        fhe_model::fhe_decrypt_word_array(&context.client_key, &expanded_key_fhe);
+    let expanded_key = fhe_model::fhe_decrypt_word_array(&context.client_key, &expanded_key_fhe);
 
-
-
-    xor_state_fhe(
+    xor_state(
         &mut state_fhe,
         expanded_key_fhe[0..4].try_into().expect("array length 4"),
     );
 
-    let mut state= fhe_model::fhe_decrypt_state(context, state_fhe);
-
     for i in 1..rounds {
+        let mut state = fhe_model::fhe_decrypt_state(context, state_fhe);
+
         sub_bytes(&mut state);
-        shift_rows(&mut state);
+
+        state_fhe = fhe_model::fhe_encrypt_state(context, state);
+
+
+        shift_rows(&mut state_fhe);
+
+        let mut state = fhe_model::fhe_decrypt_state(context, state_fhe);
+
         mix_columns(&mut state);
+
+        state_fhe = fhe_model::fhe_encrypt_state(context, state);
+
         xor_state(
-            &mut state,
-            expanded_key[i * 4..(i + 1) * 4]
+            &mut state_fhe,
+            expanded_key_fhe[i * 4..(i + 1) * 4]
                 .try_into()
                 .expect("array length 4"),
         );
     }
 
+    let mut state = fhe_model::fhe_decrypt_state(context, state_fhe);
     sub_bytes(&mut state);
-    shift_rows(&mut state);
-    xor_state(
-        &mut state,
-        expanded_key[40..44].try_into().expect("array length 4"),
-    );
 
-    let state_fhe = fhe_model::fhe_encrypt_state(context, state);
+    let mut state_fhe = fhe_model::fhe_encrypt_state(context, state);
+
+    shift_rows(&mut state_fhe);
+
+
+
+    xor_state(
+        &mut state_fhe,
+        expanded_key_fhe[40..44].try_into().expect("array length 4"),
+    );
 
     state_fhe.into_array()
 }
