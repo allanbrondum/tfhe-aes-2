@@ -202,10 +202,16 @@ impl<'a> ColumnViewMutFhe<'a> {
                 *byte ^= rhs_byte;
             });
     }
+
+    pub fn assign(&mut self, rhs: WordFhe) {
+        for (i, byte) in rhs.into_bytes().enumerate() {
+            self.1[i][self.0] = byte;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct WordFhe([BoolByteFhe; 4]);
+pub struct WordFhe(pub [BoolByteFhe; 4]);
 
 impl WordFhe {
     pub const fn zero() -> Self {
@@ -214,6 +220,10 @@ impl WordFhe {
 
     pub fn bytes(&self) -> impl Iterator<Item = &BoolByteFhe> + '_ {
         self.0.iter()
+    }
+
+    pub fn into_bytes(self) -> impl Iterator<Item = BoolByteFhe>  {
+        self.0.into_iter()
     }
 
     pub fn bytes_mut(&mut self) -> impl Iterator<Item = &mut BoolByteFhe> {

@@ -1,11 +1,14 @@
 mod fhe_model;
 mod model;
 
-use crate::impls::tfhe_boolean::fhe_model::{BlockFhe, BoolByteFhe, BoolFhe, StateFhe, WordFhe};
+use crate::impls::tfhe_boolean::fhe_model::{
+    BlockFhe, BoolByteFhe, BoolFhe, ColumnViewFhe, StateFhe, WordFhe,
+};
 use crate::impls::tfhe_boolean::model::{BoolByte, State, Word};
 use crate::{Block, Key};
-use rayon::iter::ParallelIterator;
-use rayon::iter::{IntoParallelRefIterator, ParallelBridge};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelBridge};
+use rayon::iter::{Map, ParallelIterator};
+use rayon::slice::Iter;
 use std::fmt::{Debug, Formatter};
 use std::ops::{BitXor, BitXorAssign, Index, IndexMut};
 use std::sync::Arc;
@@ -79,40 +82,23 @@ fn gf_256_mul(context: &FheContext, a: &BoolByteFhe, mut b: u8) -> BoolByteFhe {
 }
 
 fn mix_columns(context: &FheContext, state: &mut StateFhe) {
-    let mut new_state = StateFhe::default();
-
-    let new_columns: [[BoolByteFhe; 4]; 4] = state
-        .columns()
-        .collect::<Vec<_>>()
-        .par_iter()
-        .map(|column| {
-            let mut new_column: [BoolByteFhe; 4] = Default::default();
-            new_column[0] = gf_256_mul(context, &column[0], 2)
-                ^ gf_256_mul(context, &column[3], 1)
-                ^ gf_256_mul(context, &column[2], 1)
-                ^ gf_256_mul(context, &column[1], 3);
-            new_column[1] = gf_256_mul(context, &column[1], 2)
-                ^ gf_256_mul(context, &column[0], 1)
-                ^ gf_256_mul(context, &column[3], 1)
-                ^ gf_256_mul(context, &column[2], 3);
-            new_column[2] = gf_256_mul(context, &column[2], 2)
-                ^ gf_256_mul(context, &column[1], 1)
-                ^ gf_256_mul(context, &column[0], 1)
-                ^ gf_256_mul(context, &column[3], 3);
-            new_column[3] = gf_256_mul(context, &column[3], 2)
-                ^ gf_256_mul(context, &column[2], 1)
-                ^ gf_256_mul(context, &column[1], 1)
-                ^ gf_256_mul(context, &column[0], 3);
-            new_column
-        })
-        .collect::<Vec<_>>()
-        .try_into()
-        .expect("array length 4");
+    let new_columns: [WordFhe; 4] = collect_array(
+        state
+            .columns()
+            .collect::<Vec<_>>()
+            .par_iter()
+            .map(|column| {
+                WordFhe(collect_array((0..4).into_par_iter().map(|i| {
+                    gf_256_mul(context, &column[i], 2)
+                        ^ gf_256_mul(context, &column[(i - 1) % 4], 1)
+                        ^ gf_256_mul(context, &column[(i - 2) % 4], 1)
+                        ^ gf_256_mul(context, &column[(i - 3) % 4], 3)
+                })))
+            }),
+    );
 
     for (j, column) in new_columns.into_iter().enumerate() {
-        for (i, byte) in column.into_iter().enumerate() {
-            state[i][j] = byte;
-        }
+        state.column_mut(j).assign(column);
     }
 }
 
@@ -231,6 +217,15 @@ impl Debug for FheContext {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FheContext").finish()
     }
+}
+
+fn collect_array<const N: usize, T: Send + Sync + Debug>(
+    iter: impl IntoParallelIterator<Item = T>,
+) -> [T; N] {
+    iter.into_par_iter()
+        .collect::<Vec<_>>()
+        .try_into()
+        .expect("array length")
 }
 
 #[cfg(test)]
