@@ -58,9 +58,11 @@ fn shift_rows(state: &mut StateFhe) {
 }
 
 /// Multiplication in F_2[X]/(X^8 + X^4 + X^3 + X + 1)
-fn gf_256_mul(a: BoolByte, mut b: u8) -> BoolByte {
-    let mut res = 0u8;
+fn gf_256_mul(context: &FheContext, a: &BoolByteFhe, mut b: u8) -> BoolByteFhe {
+    let a = fhe_model::fhe_decrypt_byte(&context.client_key, &a);
     let mut a = u8::from(a);
+
+    let mut res = 0u8;
     for _ in 0..8 {
         if b & 1 == 1 {
             res ^= a
@@ -72,30 +74,34 @@ fn gf_256_mul(a: BoolByte, mut b: u8) -> BoolByte {
         }
         b >>= 1;
     }
-    res.into()
+
+    fhe_model::fhe_encrypt_byte(&context.client_key, context, res.into())
 }
 
-fn mix_columns(state: &mut State) {
-    for j in 0..4 {
-        let col = state.column(j).to_word();
+fn mix_columns(context: &FheContext, state: &mut StateFhe) {
+    let mut new_state = StateFhe::default();
 
-        state[0][j] = gf_256_mul(col[0], 2)
-            ^ gf_256_mul(col[3], 1)
-            ^ gf_256_mul(col[2], 1)
-            ^ gf_256_mul(col[1], 3);
-        state[1][j] = gf_256_mul(col[1], 2)
-            ^ gf_256_mul(col[0], 1)
-            ^ gf_256_mul(col[3], 1)
-            ^ gf_256_mul(col[2], 3);
-        state[2][j] = gf_256_mul(col[2], 2)
-            ^ gf_256_mul(col[1], 1)
-            ^ gf_256_mul(col[0], 1)
-            ^ gf_256_mul(col[3], 3);
-        state[3][j] = gf_256_mul(col[3], 2)
-            ^ gf_256_mul(col[2], 1)
-            ^ gf_256_mul(col[1], 1)
-            ^ gf_256_mul(col[0], 3);
+    for (j, column) in state.columns().enumerate() {
+
+        new_state[0][j] = gf_256_mul(context, &column[0], 2)
+            ^ gf_256_mul(context, &column[3], 1)
+            ^ gf_256_mul(context, &column[2], 1)
+            ^ gf_256_mul(context, &column[1], 3);
+        new_state[1][j] = gf_256_mul(context, &column[1], 2)
+            ^ gf_256_mul(context, &column[0], 1)
+            ^ gf_256_mul(context, &column[3], 1)
+            ^ gf_256_mul(context, &column[2], 3);
+        new_state[2][j] = gf_256_mul(context, &column[2], 2)
+            ^ gf_256_mul(context, &column[1], 1)
+            ^ gf_256_mul(context, &column[0], 1)
+            ^ gf_256_mul(context, &column[3], 3);
+        new_state[3][j] = gf_256_mul(context, &column[3], 2)
+            ^ gf_256_mul(context, &column[2], 1)
+            ^ gf_256_mul(context, &column[1], 1)
+            ^ gf_256_mul(context, &column[0], 3);
     }
+
+    *state = new_state;
 }
 
 pub fn encrypt_block(
@@ -115,20 +121,11 @@ pub fn encrypt_block(
 
     for i in 1..rounds {
         let mut state = fhe_model::fhe_decrypt_state(context, state_fhe);
-
         sub_bytes(&mut state);
-
         state_fhe = fhe_model::fhe_encrypt_state(context, state);
-
 
         shift_rows(&mut state_fhe);
-
-        let mut state = fhe_model::fhe_decrypt_state(context, state_fhe);
-
-        mix_columns(&mut state);
-
-        state_fhe = fhe_model::fhe_encrypt_state(context, state);
-
+        mix_columns(context, &mut state_fhe);
         xor_state(
             &mut state_fhe,
             expanded_key_fhe[i * 4..(i + 1) * 4]
@@ -139,13 +136,9 @@ pub fn encrypt_block(
 
     let mut state = fhe_model::fhe_decrypt_state(context, state_fhe);
     sub_bytes(&mut state);
-
     let mut state_fhe = fhe_model::fhe_encrypt_state(context, state);
 
     shift_rows(&mut state_fhe);
-
-
-
     xor_state(
         &mut state_fhe,
         expanded_key_fhe[40..44].try_into().expect("array length 4"),

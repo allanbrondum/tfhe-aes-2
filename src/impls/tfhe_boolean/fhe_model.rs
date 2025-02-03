@@ -114,6 +114,10 @@ impl StateFhe {
         self.0.iter_mut()
     }
 
+    pub fn columns(&self) -> impl Iterator<Item = ColumnViewFhe<'_>> {
+        (0..4).map(|j|ColumnViewFhe(j, &self.0))
+    }
+
     pub fn column(&self, j: usize) -> ColumnViewFhe<'_> {
         ColumnViewFhe(j, &self.0)
     }
@@ -157,6 +161,15 @@ impl<'a> ColumnViewFhe<'a> {
         col
     }
 }
+
+impl<'a> Index<usize> for ColumnViewFhe<'a> {
+    type Output = BoolByteFhe;
+
+    fn index(&self, row: usize) -> &Self::Output {
+        &self.1[row][self.0]
+    }
+}
+
 
 #[derive(Debug)]
 pub struct ColumnViewMutFhe<'a>(usize, &'a mut [WordFhe; 4]);
