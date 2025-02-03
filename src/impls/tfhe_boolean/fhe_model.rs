@@ -1,8 +1,8 @@
 use crate::impls::tfhe_boolean::model::{BoolByte, State, Word};
 use crate::impls::tfhe_boolean::FheContext;
-use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
-use std::ops::{BitXorAssign, Index, IndexMut};
+use rayon::iter::{IntoParallelRefIterator, ParallelBridge};
+use std::ops::{BitXor, BitXorAssign, Index, IndexMut};
 use tfhe::boolean;
 use tfhe::boolean::server_key::{BinaryBooleanGates, BinaryBooleanGatesAssign};
 
@@ -31,7 +31,11 @@ impl Default for BoolFhe {
 
 impl BitXorAssign<&BoolFhe> for BoolFhe {
     fn bitxor_assign(&mut self, rhs: &Self) {
-        self.context.as_ref().expect("conext").server_key.xor_assign(&mut self.fhe, &rhs.fhe);
+        self.context
+            .as_ref()
+            .expect("conext")
+            .server_key
+            .xor_assign(&mut self.fhe, &rhs.fhe);
     }
 }
 
@@ -58,15 +62,26 @@ impl IndexMut<usize> for BoolByteFhe {
     }
 }
 
-
 impl BitXorAssign<&BoolByteFhe> for BoolByteFhe {
     fn bitxor_assign(&mut self, rhs: &Self) {
-        for (b, rhs_b) in self.0.iter_mut().zip(rhs.0.iter()) {
-            *b ^= rhs_b;
-        }
+        self.0
+            .iter_mut()
+            .zip(rhs.0.iter())
+            .par_bridge()
+            .for_each(|(b, rhs_b)| {
+                *b ^= rhs_b;
+            });
     }
 }
 
+impl BitXor for BoolByteFhe {
+    type Output = BoolByteFhe;
+
+    fn bitxor(mut self, rhs: Self) -> Self::Output {
+        self.bitxor_assign(&rhs);
+        self
+    }
+}
 
 /// State of 4 rows each of 4 bytes
 #[derive(Debug, Default)]
@@ -134,7 +149,7 @@ impl IndexMut<usize> for StateFhe {
 pub struct ColumnViewFhe<'a>(usize, &'a [WordFhe; 4]);
 
 impl<'a> ColumnViewFhe<'a> {
-    fn clone_to_word(&self) -> WordFhe {
+    pub fn clone_to_word(&self) -> WordFhe {
         let mut col: WordFhe = Default::default();
         for i in 0..4 {
             col.0[i] = self.1[i][self.0].clone();
@@ -156,9 +171,12 @@ impl<'a> ColumnViewMutFhe<'a> {
     }
 
     pub fn bitxor_assign(&mut self, rhs: &WordFhe) {
-        for (byte, rhs_byte) in self.bytes_mut().zip(rhs.bytes()) {
-            *byte ^= rhs_byte;
-        }
+        self.bytes_mut()
+            .zip(rhs.bytes())
+            .par_bridge()
+            .for_each(|(byte, rhs_byte)| {
+                *byte ^= rhs_byte;
+            });
     }
 }
 
@@ -204,12 +222,14 @@ impl IndexMut<usize> for WordFhe {
 
 impl BitXorAssign for WordFhe {
     fn bitxor_assign(&mut self, rhs: Self) {
-        for (byte, rhs_byte) in self.bytes_mut().zip(rhs.bytes()) {
-            *byte ^= rhs_byte;
-        }
+        self.bytes_mut()
+            .zip(rhs.bytes())
+            .par_bridge()
+            .for_each(|(byte, rhs_byte)| {
+                *byte ^= rhs_byte;
+            });
     }
 }
-
 
 pub fn fhe_encrypt_word_array<const N: usize>(
     client_key: &boolean::client_key::ClientKey,
