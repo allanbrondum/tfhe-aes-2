@@ -1,20 +1,26 @@
 mod fhe_model;
 mod model;
 
-use crate::impls::tfhe_boolean::fhe_model::{
-    BlockFhe, BoolByteFhe, BoolFhe, ColumnViewFhe, StateFhe, WordFhe,
+use crate::impls::tfhe_wop_shortint::fhe_model::{
+    BlockFhe, BoolByteFhe, BoolFhe, StateFhe, WordFhe,
 };
-use crate::impls::tfhe_boolean::model::{BoolByte, State, Word};
+use crate::impls::tfhe_wop_shortint::model::{BoolByte, State, Word};
 use crate::{Block, Key};
+use rayon::iter::ParallelIterator;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelBridge};
-use rayon::iter::{Map, ParallelIterator};
-use rayon::slice::Iter;
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::ops::{BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
-use tfhe::boolean;
+use tfhe::core_crypto::prelude::*;
+use tfhe::shortint;
+use tfhe::shortint::parameters::V0_11_PARAM_MESSAGE_1_CARRY_7_KS_PBS_GAUSSIAN_2M64;
+use tfhe::shortint::wopbs::WopbsKey;
+use tfhe::shortint::{
+    CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus, ShortintParameterSet,
+    WopbsParameters,
+};
 
 static SBOX: [u8; 256] = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -207,13 +213,74 @@ fn sub_word(mut word: Word) -> Word {
     word
 }
 
+static BOOL_FHE_DEFAULT: OnceLock<BoolFhe> = OnceLock::new();
+
+fn params() -> ShortintParameterSet {
+    let wopbs_params = WopbsParameters {
+        lwe_dimension: LweDimension(660),
+        glwe_dimension: GlweDimension(2),
+        polynomial_size: PolynomialSize(1024),
+        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            6.676348397087967e-05,
+        )),
+        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            9.313225746198247e-10,
+        )),
+        pbs_base_log: DecompositionBaseLog(9),
+        pbs_level: DecompositionLevelCount(4),
+        ks_level: DecompositionLevelCount(6),
+        ks_base_log: DecompositionBaseLog(2),
+        pfks_level: DecompositionLevelCount(2),
+        pfks_base_log: DecompositionBaseLog(16),
+        pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            9.313225746198247e-10,
+        )),
+        cbs_level: DecompositionLevelCount(3),
+        cbs_base_log: DecompositionBaseLog(7),
+        message_modulus: MessageModulus(2),
+        carry_modulus: CarryModulus(1),
+        ciphertext_modulus: CiphertextModulus::new_native(),
+        encryption_key_choice: EncryptionKeyChoice::Big,
+    };
+
+    let pbs_params = ClassicPBSParameters {
+        lwe_dimension: wopbs_params.lwe_dimension,
+        glwe_dimension: wopbs_params.glwe_dimension,
+        polynomial_size: wopbs_params.polynomial_size,
+        lwe_noise_distribution: wopbs_params.lwe_noise_distribution,
+        glwe_noise_distribution: wopbs_params.glwe_noise_distribution,
+        pbs_base_log: wopbs_params.pbs_base_log,
+        pbs_level: wopbs_params.pbs_level,
+        ks_base_log: wopbs_params.ks_base_log,
+        ks_level: wopbs_params.ks_level,
+        message_modulus: wopbs_params.message_modulus,
+        carry_modulus: wopbs_params.carry_modulus,
+        max_noise_level: MaxNoiseLevel::new(10),
+        log2_p_fail: -64.074,
+        ciphertext_modulus: wopbs_params.ciphertext_modulus,
+        encryption_key_choice: wopbs_params.encryption_key_choice,
+    };
+
+    ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
+}
+
 pub fn encrypt_single_block(key: Key, block: Block, rounds: usize) -> Block {
-    let (client_key, server_key) = boolean::gen_keys();
+    let (client_key, server_key) = shortint::gen_keys(params());
+
+    let wops_key = WopbsKey::new_wopbs_key_only_for_wopbs(&client_key, &server_key);
 
     let context = FheContext {
         client_key: client_key.into(),
         server_key: server_key.into(),
+        wopbs_key: wops_key.into(),
     };
+
+    BOOL_FHE_DEFAULT
+        .set(BoolFhe::new(
+            context.server_key.create_trivial(0),
+            context.clone(),
+        ))
+        .expect("only set once");
 
     let key_fhe = fhe_model::fhe_encrypt_byte_array(&context.client_key, &context, &key);
     let block_fhe = fhe_model::fhe_encrypt_byte_array(&context.client_key, &context, &block);
@@ -236,8 +303,9 @@ pub fn encrypt_single_block(key: Key, block: Block, rounds: usize) -> Block {
 
 #[derive(Clone)]
 struct FheContext {
-    client_key: Arc<boolean::client_key::ClientKey>,
-    server_key: Arc<boolean::server_key::ServerKey>,
+    client_key: Arc<shortint::client_key::ClientKey>,
+    server_key: Arc<shortint::server_key::ServerKey>,
+    wopbs_key: Arc<shortint::wopbs::WopbsKey>,
 }
 
 impl Debug for FheContext {
@@ -267,8 +335,8 @@ fn shl_array<const N: usize, T: Default>(array: &mut [T; N], shl: usize) {
 
 #[cfg(test)]
 mod test {
-    use crate::impls::tfhe_boolean::model::BoolByte;
-    use crate::impls::tfhe_boolean::shl_array;
+    use crate::impls::tfhe_wop_shortint::model::BoolByte;
+    use crate::impls::tfhe_wop_shortint::shl_array;
 
     #[test]
     fn test_bool_byte() {
@@ -292,10 +360,10 @@ mod test {
     }
 
     use crate::impls;
-    use crate::impls::{boolean, plain, tfhe_boolean, tfhe_shortint};
+    use crate::impls::{tfhe_shortint, tfhe_wop_shortint};
 
     #[test]
-    fn test_tfhe_boolean() {
-        impls::test::test_vs_plain(tfhe_boolean::encrypt_single_block, 2);
+    fn test_tfhe_wop_shortint() {
+        impls::test::test_vs_plain(tfhe_wop_shortint::encrypt_single_block, 2);
     }
 }

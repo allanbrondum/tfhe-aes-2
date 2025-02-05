@@ -27,7 +27,6 @@ static RC: [u8; 11] = [
     0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36,
 ];
 
-
 fn substitute(byte: BoolByte) -> BoolByte {
     SBOX[u8::from(byte) as usize].into()
 }
@@ -169,5 +168,13 @@ mod test {
     fn test_bool_byte() {
         let byte = 0x12;
         assert_eq!(u8::from(BoolByte::from(byte)), byte);
+    }
+
+    use crate::impls;
+    use crate::impls::{boolean, plain, tfhe_boolean, tfhe_shortint};
+
+    #[test]
+    fn test_boolean() {
+        impls::test::test_vs_plain(boolean::encrypt_single_block, 2);
     }
 }

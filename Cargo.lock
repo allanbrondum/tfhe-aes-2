@@ -226,9 +226,9 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.13.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
 dependencies = [
  "either",
 ]
@@ -450,9 +450,7 @@ dependencies = [
 
 [[package]]
 name = "tfhe"
-version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7cb0956418a370a8126639e385c2387fc1a67f0b013109a21047544281659ba"
+version = "0.11.0"
 dependencies = [
  "aligned-vec",
  "bincode",
@@ -486,8 +484,6 @@ dependencies = [
 [[package]]
 name = "tfhe-csprng"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b1a0b71a91c9e36e9e1e8e6a528a056086b01e193e173472ae59cfaac56fdad"
 dependencies = [
  "aes",
  "libc",
@@ -497,8 +493,6 @@ dependencies = [
 [[package]]
 name = "tfhe-fft"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d29c04af86970d497177e5239e4607b85fc1214cbff730194d23806aa8bee5f8"
 dependencies = [
  "aligned-vec",
  "bytemuck",
@@ -512,8 +506,6 @@ dependencies = [
 [[package]]
 name = "tfhe-ntt"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c6edf57a11500142fd5731a54d8eb099f8b7b1b17d5ad1e916b668544e83b20"
 dependencies = [
  "aligned-vec",
  "bytemuck",
@@ -523,8 +515,6 @@ dependencies = [
 [[package]]
 name = "tfhe-versionable"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0dbabeaf1795ae45a20da6f3d34f8dd758f18cc1526b633250456c268716674"
 dependencies = [
  "aligned-vec",
  "num-complex",
@@ -535,8 +525,6 @@ dependencies = [
 [[package]]
 name = "tfhe-versionable-derive"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ecd3db096e2fb065e012a2f5f8e03789ff980109809e484165c8d7d728a8a11d"
 dependencies = [
  "proc-macro2",
  "quote",

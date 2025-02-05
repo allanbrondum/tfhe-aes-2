@@ -1,8 +1,8 @@
 mod model;
 
+use crate::impls::plain::model::{State, Word};
 use crate::{Block, Key};
 use std::ops::{BitXor, BitXorAssign, Index, IndexMut};
-use crate::impls::plain::model::{State, Word};
 
 static SBOX: [u8; 256] = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -26,8 +26,6 @@ static SBOX: [u8; 256] = [
 static RC: [u8; 11] = [
     0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36,
 ];
-
-
 
 fn substitute(byte: u8) -> u8 {
     SBOX[byte as usize]
@@ -161,4 +159,15 @@ fn sub_word(mut word: Word) -> Word {
 pub fn encrypt_single_block(key: Key, block: Block, rounds: usize) -> Block {
     let key_schedule = key_schedule(&key);
     encrypt_block(&key_schedule, block, rounds)
+}
+
+#[cfg(test)]
+mod test {
+    use crate::impls;
+    use crate::impls::{boolean, plain, tfhe_boolean, tfhe_shortint};
+
+    #[test]
+    fn test_plain() {
+        impls::test::test_vs_aes(plain::encrypt_single_block);
+    }
 }

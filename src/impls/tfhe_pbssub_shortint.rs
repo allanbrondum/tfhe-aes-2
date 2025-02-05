@@ -1,20 +1,26 @@
 mod fhe_model;
 mod model;
 
-use crate::impls::tfhe_boolean::fhe_model::{
-    BlockFhe, BoolByteFhe, BoolFhe, ColumnViewFhe, StateFhe, WordFhe,
+use crate::impls::tfhe_pbssub_shortint::fhe_model::{
+    BlockFhe, BoolByteFhe, BoolFhe, IntByteFhe, StateFhe, WordFhe,
 };
-use crate::impls::tfhe_boolean::model::{BoolByte, State, Word};
+use crate::impls::tfhe_pbssub_shortint::model::{BoolByte, State, Word};
 use crate::{Block, Key};
+use rayon::iter::ParallelIterator;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelBridge};
-use rayon::iter::{Map, ParallelIterator};
-use rayon::slice::Iter;
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::ops::{BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
-use tfhe::boolean;
+use tfhe::core_crypto::prelude::{
+    CiphertextModulus, DecompositionBaseLog, DecompositionLevelCount, DynamicDistribution,
+    GlweDimension, LweDimension, PolynomialSize, StandardDev,
+};
+use tfhe::shortint;
+use tfhe::shortint::{
+    CarryModulus, ClassicPBSParameters, EncryptionKeyChoice, MaxNoiseLevel, MessageModulus,
+};
 
 static SBOX: [u8; 256] = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -207,13 +213,52 @@ fn sub_word(mut word: Word) -> Word {
     word
 }
 
+static BOOL_FHE_DEFAULT: OnceLock<BoolFhe> = OnceLock::new();
+static INT_BYTE_FHE_DEFAULT: OnceLock<IntByteFhe> = OnceLock::new();
+
+const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
+    lwe_dimension: LweDimension(692),
+    glwe_dimension: GlweDimension(4),
+    polynomial_size: PolynomialSize(512),
+    lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+        3.5539902359442825e-06,
+    )),
+    glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+        2.845267479601915e-15,
+    )),
+    pbs_base_log: DecompositionBaseLog(12),
+    pbs_level: DecompositionLevelCount(3),
+    ks_base_log: DecompositionBaseLog(3),
+    ks_level: DecompositionLevelCount(4),
+    message_modulus: MessageModulus(2),
+    carry_modulus: CarryModulus(1),
+    max_noise_level: MaxNoiseLevel::new(20),
+    log2_p_fail: -64.074,
+    ciphertext_modulus: CiphertextModulus::new_native(),
+    encryption_key_choice: EncryptionKeyChoice::Big,
+};
+
 pub fn encrypt_single_block(key: Key, block: Block, rounds: usize) -> Block {
-    let (client_key, server_key) = boolean::gen_keys();
+    let (client_key, server_key) = shortint::gen_keys(PARAMS);
 
     let context = FheContext {
         client_key: client_key.into(),
         server_key: server_key.into(),
     };
+
+    BOOL_FHE_DEFAULT
+        .set(BoolFhe::new(
+            context.server_key.create_trivial(0),
+            context.clone(),
+        ))
+        .expect("only set once");
+
+    INT_BYTE_FHE_DEFAULT
+        .set(IntByteFhe::new(
+            context.server_key.create_trivial(0),
+            context.clone(),
+        ))
+        .expect("only set once");
 
     let key_fhe = fhe_model::fhe_encrypt_byte_array(&context.client_key, &context, &key);
     let block_fhe = fhe_model::fhe_encrypt_byte_array(&context.client_key, &context, &block);
@@ -236,8 +281,8 @@ pub fn encrypt_single_block(key: Key, block: Block, rounds: usize) -> Block {
 
 #[derive(Clone)]
 struct FheContext {
-    client_key: Arc<boolean::client_key::ClientKey>,
-    server_key: Arc<boolean::server_key::ServerKey>,
+    client_key: Arc<shortint::client_key::ClientKey>,
+    server_key: Arc<shortint::server_key::ServerKey>,
 }
 
 impl Debug for FheContext {
@@ -267,8 +312,8 @@ fn shl_array<const N: usize, T: Default>(array: &mut [T; N], shl: usize) {
 
 #[cfg(test)]
 mod test {
-    use crate::impls::tfhe_boolean::model::BoolByte;
-    use crate::impls::tfhe_boolean::shl_array;
+    use crate::impls::tfhe_pbssub_shortint::model::BoolByte;
+    use crate::impls::tfhe_pbssub_shortint::shl_array;
 
     #[test]
     fn test_bool_byte() {
@@ -292,10 +337,10 @@ mod test {
     }
 
     use crate::impls;
-    use crate::impls::{boolean, plain, tfhe_boolean, tfhe_shortint};
+    use crate::impls::tfhe_shortint;
 
     #[test]
-    fn test_tfhe_boolean() {
-        impls::test::test_vs_plain(tfhe_boolean::encrypt_single_block, 2);
+    fn test_tfhe_pbssub_shortint() {
+        impls::test::test_vs_plain(tfhe_shortint::encrypt_single_block, 2);
     }
 }

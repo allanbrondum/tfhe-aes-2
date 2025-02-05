@@ -1,124 +1,59 @@
-use crate::impls::tfhe_boolean::model::{BoolByte, State, Word};
-use crate::impls::tfhe_boolean::FheContext;
+use crate::impls::tfhe_wop_shortint::model::{BoolByte, State, Word};
+use crate::impls::tfhe_wop_shortint::{FheContext, BOOL_FHE_DEFAULT};
 use rayon::iter::ParallelIterator;
 use rayon::iter::{IntoParallelRefIterator, ParallelBridge};
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::ops::{BitAnd, BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
-use tfhe::boolean;
-use tfhe::boolean::server_key::{BinaryBooleanGates, BinaryBooleanGatesAssign};
+use tfhe::shortint;
 
 pub type BlockFhe = [BoolByteFhe; 16];
 
 #[derive(Clone)]
 pub struct BoolFhe {
-    fhe: boolean::ciphertext::Ciphertext,
-    context: Option<FheContext>,
+    fhe: shortint::ciphertext::Ciphertext,
+    context: FheContext,
 }
 
 impl BoolFhe {
-    pub fn new(fhe: boolean::ciphertext::Ciphertext, context: FheContext) -> Self {
-        Self {
-            fhe,
-            context: Some(context),
-        }
+    pub fn new(fhe: shortint::ciphertext::Ciphertext, context: FheContext) -> Self {
+        Self { fhe, context }
     }
-
-    pub const fn trivial(b: bool) -> Self {
-        Self {
-            fhe: boolean::ciphertext::Ciphertext::Trivial(b),
-            context: None,
-        }
-    }
-
-    // pub fn mux(&self, then: &Self, r#else: &Self) -> Self {
-    //     if let Some(context) = self.context.as_ref() {
-    //         BoolFhe::new(
-    //             context.server_key.mux(&self.fhe, &then.fhe, &r#else.fhe),
-    //             context.clone(),
-    //         )
-    //     } else if let boolean::ciphertext::Ciphertext::Trivial(this) = &self.fhe {
-    //         if *this {
-    //             then.clone()
-    //         } else {
-    //             r#else.clone()
-    //         }
-    //     } else {
-    //         panic!("no fhe context and non-trivial operands");
-    //     }
-    // }
 }
 
 impl Debug for BoolFhe {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BoolFhe")
-            .field("fhe", &self.fhe)
-            .field("context", &self.context.as_ref().map(|_| ()))
-            .finish()
+        f.debug_struct("BoolFhe").field("fhe", &self.fhe).finish()
     }
 }
 
 impl Default for BoolFhe {
     fn default() -> Self {
-        Self::trivial(false)
+        BOOL_FHE_DEFAULT.get().expect("default set").clone()
     }
 }
 
 impl BitXorAssign<&BoolFhe> for BoolFhe {
     fn bitxor_assign(&mut self, rhs: &Self) {
-        if let Some(context) = self.context.as_ref().or(rhs.context.as_ref()) {
-            context.server_key.xor_assign(&mut self.fhe, &rhs.fhe);
-            self.context = Some(context.clone());
-        } else if let (
-            boolean::ciphertext::Ciphertext::Trivial(this),
-            boolean::ciphertext::Ciphertext::Trivial(rhs),
-        ) = (&mut self.fhe, &rhs.fhe)
-        {
-            this.bitxor_assign(rhs);
-        } else {
-            panic!(
-                "no fhe context and non-trivial operands {:?} {:?}",
-                self, rhs
-            );
-        }
+        self.context
+            .server_key
+            .unchecked_add_assign(&mut self.fhe, &rhs.fhe);
     }
 }
 
 impl BitXor for BoolFhe {
-    type Output = BoolFhe;
+    type Output = Self;
 
-    fn bitxor(mut self, rhs: BoolFhe) -> Self::Output {
+    fn bitxor(mut self, rhs: Self) -> Self::Output {
         self.bitxor_assign(&rhs);
         self
     }
 }
 
-// impl BitAnd<BoolFhe> for &BoolFhe {
-//     type Output = BoolFhe;
-//
-//     fn bitand(self, rhs: BoolFhe) -> Self::Output {
-//         if let Some(context) = self.context.as_ref().or(rhs.context.as_ref()) {
-//             BoolFhe::new(context.server_key.and(&self.fhe, &rhs.fhe), context.clone())
-//         } else if let (
-//             boolean::ciphertext::Ciphertext::Trivial(this),
-//             boolean::ciphertext::Ciphertext::Trivial(rhs),
-//         ) = (&self.fhe, &rhs.fhe)
-//         {
-//             BoolFhe::trivial(this.bitand(rhs))
-//         } else {
-//             panic!("no fhe context and non-trivial operands");
-//         }
-//     }
-// }
-
 #[derive(Debug, Clone, Default)]
 pub struct BoolByteFhe([BoolFhe; 8]);
 
 impl BoolByteFhe {
-    pub const fn zero() -> Self {
-        Self([const { BoolFhe::trivial(false) }; 8])
-    }
-
     pub fn shl_assign_1(&mut self) -> BoolFhe {
         let ret = mem::take(&mut self.0[0]);
         self.shl_assign(1);
@@ -228,7 +163,7 @@ impl IndexMut<usize> for StateFhe {
 #[derive(Debug, Copy, Clone)]
 pub struct ColumnViewFhe<'a>(usize, &'a [WordFhe; 4]);
 
-impl<'a> ColumnViewFhe<'a> {
+impl ColumnViewFhe<'_> {
     pub fn bytes(&self) -> impl Iterator<Item = &BoolByteFhe> + '_ {
         (0..4).map(|i| &self.1[i][self.0])
     }
@@ -242,7 +177,7 @@ impl<'a> ColumnViewFhe<'a> {
     }
 }
 
-impl<'a> Index<usize> for ColumnViewFhe<'a> {
+impl Index<usize> for ColumnViewFhe<'_> {
     type Output = BoolByteFhe;
 
     fn index(&self, row: usize) -> &Self::Output {
@@ -253,7 +188,7 @@ impl<'a> Index<usize> for ColumnViewFhe<'a> {
 #[derive(Debug)]
 pub struct ColumnViewMutFhe<'a>(usize, &'a mut [WordFhe; 4]);
 
-impl<'a> ColumnViewMutFhe<'a> {
+impl ColumnViewMutFhe<'_> {
     pub fn bytes(&self) -> impl Iterator<Item = &BoolByteFhe> + '_ {
         (0..4).map(|i| &self.1[i][self.0])
     }
@@ -282,10 +217,6 @@ impl<'a> ColumnViewMutFhe<'a> {
 pub struct WordFhe(pub [BoolByteFhe; 4]);
 
 impl WordFhe {
-    pub const fn zero() -> Self {
-        Self([const { BoolByteFhe::zero() }; 4])
-    }
-
     pub fn bytes(&self) -> impl Iterator<Item = &BoolByteFhe> + '_ {
         self.0.iter()
     }
@@ -334,7 +265,7 @@ impl BitXorAssign for WordFhe {
 }
 
 pub fn fhe_encrypt_word_array<const N: usize>(
-    client_key: &boolean::client_key::ClientKey,
+    client_key: &shortint::client_key::ClientKey,
     context: &FheContext,
     array: &[Word; N],
 ) -> [WordFhe; N] {
@@ -347,7 +278,7 @@ pub fn fhe_encrypt_word_array<const N: usize>(
 }
 
 pub fn fhe_encrypt_byte_array<const N: usize>(
-    client_key: &boolean::client_key::ClientKey,
+    client_key: &shortint::client_key::ClientKey,
     context: &FheContext,
     array: &[u8; N],
 ) -> [BoolByteFhe; N] {
@@ -360,7 +291,7 @@ pub fn fhe_encrypt_byte_array<const N: usize>(
 }
 
 pub fn fhe_encrypt_bool_byte_array<const N: usize>(
-    client_key: &boolean::client_key::ClientKey,
+    client_key: &shortint::client_key::ClientKey,
     context: &FheContext,
     array: &[BoolByte; N],
 ) -> [BoolByteFhe; N] {
@@ -373,7 +304,7 @@ pub fn fhe_encrypt_bool_byte_array<const N: usize>(
 }
 
 pub fn fhe_encrypt_byte(
-    client_key: &boolean::client_key::ClientKey,
+    client_key: &shortint::client_key::ClientKey,
     context: &FheContext,
     byte: BoolByte,
 ) -> BoolByteFhe {
@@ -388,15 +319,15 @@ pub fn fhe_encrypt_byte(
 }
 
 pub fn fhe_encrypt_bool(
-    client_key: &boolean::client_key::ClientKey,
+    client_key: &shortint::client_key::ClientKey,
     context: &FheContext,
     b: bool,
 ) -> BoolFhe {
-    BoolFhe::new(client_key.encrypt(b), context.clone())
+    BoolFhe::new(client_key.encrypt(b.into()), context.clone())
 }
 
 pub fn fhe_decrypt_word_array<const N: usize>(
-    client_key: &boolean::client_key::ClientKey,
+    client_key: &shortint::client_key::ClientKey,
     array: &[WordFhe; N],
 ) -> [Word; N] {
     array
@@ -408,7 +339,7 @@ pub fn fhe_decrypt_word_array<const N: usize>(
 }
 
 pub fn fhe_decrypt_byte_array<const N: usize>(
-    client_key: &boolean::client_key::ClientKey,
+    client_key: &shortint::client_key::ClientKey,
     array: &[BoolByteFhe; N],
 ) -> [u8; N] {
     array
@@ -420,7 +351,7 @@ pub fn fhe_decrypt_byte_array<const N: usize>(
 }
 
 pub fn fhe_decrypt_bool_byte_array<const N: usize>(
-    client_key: &boolean::client_key::ClientKey,
+    client_key: &shortint::client_key::ClientKey,
     array: &[BoolByteFhe; N],
 ) -> [BoolByte; N] {
     array
@@ -432,7 +363,7 @@ pub fn fhe_decrypt_bool_byte_array<const N: usize>(
 }
 
 pub fn fhe_decrypt_byte(
-    client_key: &boolean::client_key::ClientKey,
+    client_key: &shortint::client_key::ClientKey,
     byte: &BoolByteFhe,
 ) -> BoolByte {
     BoolByte(
@@ -445,8 +376,9 @@ pub fn fhe_decrypt_byte(
     )
 }
 
-pub fn fhe_decrypt_bool(client_key: &boolean::client_key::ClientKey, b: &BoolFhe) -> bool {
-    client_key.decrypt(&b.fhe)
+pub fn fhe_decrypt_bool(client_key: &shortint::client_key::ClientKey, b: &BoolFhe) -> bool {
+    let val = client_key.decrypt(&b.fhe) & 1;
+    (val & 1) != 0
 }
 
 pub fn fhe_decrypt_state(context: &FheContext, state_fhe: StateFhe) -> State {
@@ -464,20 +396,84 @@ mod test {
     use super::*;
     use std::sync::Arc;
     use std::time::Instant;
+    use tfhe::core_crypto::prelude::*;
+    use tfhe::shortint::parameters::{
+        V0_11_PARAM_MESSAGE_1_CARRY_7_KS_PBS_GAUSSIAN_2M64,
+        V0_11_PARAM_MESSAGE_2_CARRY_2_KS_PBS_GAUSSIAN_2M64,
+    };
+    use tfhe::shortint::wopbs::WopbsKey;
+    use tfhe::shortint::{
+        CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus, ShortintParameterSet,
+        WopbsParameters,
+    };
 
-    fn keys() -> (Arc<boolean::client_key::ClientKey>, FheContext) {
-        let (client_key, server_key) = boolean::gen_keys();
+    fn params() -> ShortintParameterSet {
+        let wopbs_params = WopbsParameters {
+            lwe_dimension: LweDimension(660),
+            glwe_dimension: GlweDimension(2),
+            polynomial_size: PolynomialSize(1024),
+            lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+                6.676348397087967e-05,
+            )),
+            glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+                9.313225746198247e-10,
+            )),
+            pbs_base_log: DecompositionBaseLog(9),
+            pbs_level: DecompositionLevelCount(4),
+            ks_level: DecompositionLevelCount(6),
+            ks_base_log: DecompositionBaseLog(2),
+            pfks_level: DecompositionLevelCount(2),
+            pfks_base_log: DecompositionBaseLog(16),
+            pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+                9.313225746198247e-10,
+            )),
+            cbs_level: DecompositionLevelCount(3),
+            cbs_base_log: DecompositionBaseLog(7),
+            message_modulus: MessageModulus(2),
+            carry_modulus: CarryModulus(1),
+            ciphertext_modulus: CiphertextModulus::new_native(),
+            encryption_key_choice: EncryptionKeyChoice::Big,
+        };
+
+        let pbs_params = ClassicPBSParameters {
+            lwe_dimension: wopbs_params.lwe_dimension,
+            glwe_dimension: wopbs_params.glwe_dimension,
+            polynomial_size: wopbs_params.polynomial_size,
+            lwe_noise_distribution: wopbs_params.lwe_noise_distribution,
+            glwe_noise_distribution: wopbs_params.glwe_noise_distribution,
+            pbs_base_log: wopbs_params.pbs_base_log,
+            pbs_level: wopbs_params.pbs_level,
+            ks_base_log: wopbs_params.ks_base_log,
+            ks_level: wopbs_params.ks_level,
+            message_modulus: wopbs_params.message_modulus,
+            carry_modulus: wopbs_params.carry_modulus,
+            max_noise_level: MaxNoiseLevel::new(10),
+            log2_p_fail: -64.074,
+            ciphertext_modulus: wopbs_params.ciphertext_modulus,
+            encryption_key_choice: wopbs_params.encryption_key_choice,
+        };
+
+        ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
+    }
+
+    fn keys() -> (Arc<shortint::ClientKey>, FheContext) {
+        let (client_key, server_key) = shortint::gen_keys(params());
+
+        // println!("server key: {:#?}", server_key);
+
+        let wops_key = WopbsKey::new_wopbs_key_only_for_wopbs(&client_key, &server_key);
 
         let context = FheContext {
             client_key: client_key.clone().into(),
             server_key: server_key.into(),
+            wopbs_key: wops_key.into(),
         };
 
         (context.client_key.clone(), context)
     }
 
     #[test]
-    fn test_bool_fhe() {
+    fn test_wop_shortint_bool_fhe() {
         let (client_key, context) = keys();
 
         let mut b1 = fhe_encrypt_bool(&client_key, &context, false);
@@ -501,18 +497,26 @@ mod test {
     }
 
     #[test]
-    fn test_bool_perf() {
+    fn test_wop_shortint_perf() {
         let start = Instant::now();
         let (client_key, context) = keys();
         println!("keys generated: {:?}", start.elapsed());
 
         let start = Instant::now();
-        let mut b1 = client_key.encrypt(false);
-        let b2 = client_key.encrypt(true);
-        println!("data encrypted: {:?}", start.elapsed());
+        let mut b1 = client_key.encrypt(1);
+        let b2 = client_key.encrypt(3);
+        println!(
+            "data encrypted: {:?}, dim: {}",
+            start.elapsed(),
+            b2.ct.data.len()
+        );
 
         let start = Instant::now();
-        context.server_key.xor_assign(&mut b1, &b2);
-        println!("xor bootstrap elapsed: {:?}", start.elapsed());
+        context.server_key.unchecked_add_assign(&mut b1, &b2);
+        println!("add elapsed: {:?}", start.elapsed());
+
+        let start = Instant::now();
+        context.server_key.message_extract_assign(&mut b1);
+        println!("bootstrap elapsed: {:?}", start.elapsed());
     }
 }

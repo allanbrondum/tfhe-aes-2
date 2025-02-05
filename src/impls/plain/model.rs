@@ -144,4 +144,3 @@ impl IndexMut<usize> for Word {
         &mut self.0[index]
     }
 }
-

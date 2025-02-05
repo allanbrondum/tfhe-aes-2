@@ -1,23 +1,26 @@
 pub mod boolean;
-pub mod tfhe_boolean;
 pub mod plain;
+pub mod tfhe_boolean;
+pub mod tfhe_pbssub_shortint;
+pub mod tfhe_shortint;
+pub mod tfhe_wop_shortint;
 
 #[cfg(test)]
 mod test {
-    use crate::impls::{boolean, plain, tfhe_boolean};
+    use crate::impls::{boolean, plain, tfhe_boolean, tfhe_shortint};
     use crate::{Block, Key, ROUNDS};
     use aes::cipher::{BlockEncrypt, KeyInit};
     use rand::{Rng, SeedableRng};
     use rand_chacha::ChaCha20Rng;
 
-    fn encrypt_aes_lib(key: Key, block: Block) -> Block {
+    pub fn encrypt_aes_lib(key: Key, block: Block) -> Block {
         let aes = aes::Aes128::new_from_slice(&key).unwrap();
         let mut block = block.into();
         aes.encrypt_block(&mut block);
         block.into()
     }
 
-    fn test_vs_aes(encrypt_fn: fn(key: Key, block: Block, rounds: usize) -> Block) {
+    pub fn test_vs_aes(encrypt_fn: fn(key: Key, block: Block, rounds: usize) -> Block) {
         let seed: [u8; 32] = Default::default();
         let mut rng = ChaCha20Rng::from_seed(seed);
         let mut key: Key = Default::default();
@@ -30,7 +33,7 @@ mod test {
         assert_eq!(encrypted, encrypt_aes_lib(key, block));
     }
 
-    fn test_vs_plain(
+    pub fn test_vs_plain(
         encrypt_fn: fn(key: Key, block: Block, rounds: usize) -> Block,
         rounds: usize,
     ) {
@@ -52,11 +55,6 @@ mod test {
     }
 
     #[test]
-    fn test_plain2() {
-        test_vs_aes(plain::encrypt_single_block);
-    }
-
-    #[test]
     fn test_boolean() {
         test_vs_plain(boolean::encrypt_single_block, 2);
     }
@@ -64,5 +62,10 @@ mod test {
     #[test]
     fn test_tfhe_boolean() {
         test_vs_plain(tfhe_boolean::encrypt_single_block, 2);
+    }
+
+    // #[test]
+    fn test_tfhe_shortint() {
+        test_vs_plain(tfhe_shortint::encrypt_single_block, 2);
     }
 }
