@@ -6,13 +6,14 @@ use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::ops::{BitAnd, BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
 use tfhe::shortint;
+use tfhe::shortint::server_key::LookupTableOwned;
 
 pub type BlockFhe = [BoolByteFhe; 16];
 
 #[derive(Clone)]
 pub struct BoolFhe {
     ct: shortint::ciphertext::Ciphertext,
-    context: FheContext,
+    pub context: FheContext,
 }
 
 impl BoolFhe {
@@ -68,7 +69,7 @@ impl BoolByteFhe {
         self.0.iter_mut()
     }
 
-    fn bootstrap_from_int_byte(int_byte: &IntByteFhe) -> Self {
+    pub fn bootstrap_from_int_byte(int_byte: &IntByteFhe) -> Self {
         let context = &int_byte.context;
 
         let mut res = Self::default();
@@ -128,8 +129,8 @@ impl BitXor for BoolByteFhe {
 
 #[derive(Clone)]
 pub struct IntByteFhe {
-    ct: shortint::ciphertext::Ciphertext,
-    context: FheContext,
+    pub ct: shortint::ciphertext::Ciphertext,
+    pub context: FheContext,
 }
 
 impl IntByteFhe {
@@ -151,7 +152,7 @@ impl Default for IntByteFhe {
 }
 
 impl IntByteFhe {
-    fn bootstrap_from_bool_byte(bool_byte: &BoolByteFhe) -> Self {
+    pub fn bootstrap_from_bool_byte(bool_byte: &BoolByteFhe) -> Self {
         let mut res = Self::default();
         let context = &res.context;
 
@@ -159,13 +160,17 @@ impl IntByteFhe {
             // todo move to static lazy
             let lut = context
                 .server_key
-                .generate_lookup_table(|unscaled| unscaled << (8 - index - 1));
+                .generate_lookup_table(|unscaled| (unscaled & 1) << (8 - index - 1));
             let scaled = context.server_key.apply_lookup_table(&bit.ct, &lut);
             context
                 .server_key
                 .unchecked_add_assign(&mut res.ct, &scaled);
         }
         res
+    }
+
+    pub fn apply_lookup_table_assign(&mut self, acc: &LookupTableOwned)  {
+        self.context.server_key.apply_lookup_table_assign(&mut self.ct, acc);
     }
 }
 
@@ -552,6 +557,25 @@ mod test {
 
         let decrypted = client_key.decrypt(&int_byte_fhe.ct);
         assert_eq!(decrypted, 0b10110101);
+    }
+
+    #[test]
+    fn test_pbssub_shortint_int_byte_boostrap_from_bool_byte_fhe2() {
+        let (client_key, context) = keys();
+
+        let bool_byte = BoolByte::from(0b10110101);
+        let bool_byte_fhe = fhe_encrypt_byte(&client_key, &context, bool_byte);
+
+        let bool_byte2 = BoolByte::from(0b01100110);
+        let bool_byte_fhe2 = fhe_encrypt_byte(&client_key, &context, bool_byte2);
+
+        let bool_byte_fhe = bool_byte_fhe ^ bool_byte_fhe2.clone();
+
+        let int_byte_fhe = IntByteFhe::bootstrap_from_bool_byte(&bool_byte_fhe);
+
+        let decrypted_int = client_key.decrypt(&int_byte_fhe.ct) as u8;
+        let decrypted_bool = u8::from(fhe_decrypt_byte(&client_key, &bool_byte_fhe));
+        assert_eq!(decrypted_int, decrypted_bool);
     }
 
     #[test]

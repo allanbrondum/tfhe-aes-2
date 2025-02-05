@@ -1,9 +1,7 @@
 mod fhe_model;
 mod model;
 
-use crate::impls::tfhe_pbssub_shortint::fhe_model::{
-    BlockFhe, BoolByteFhe, BoolFhe, IntByteFhe, StateFhe, WordFhe,
-};
+use crate::impls::tfhe_pbssub_shortint::fhe_model::{fhe_decrypt_byte, fhe_encrypt_byte, BlockFhe, BoolByteFhe, BoolFhe, IntByteFhe, StateFhe, WordFhe};
 use crate::impls::tfhe_pbssub_shortint::model::{BoolByte, State, Word};
 use crate::{Block, Key};
 use rayon::iter::ParallelIterator;
@@ -45,7 +43,44 @@ static RC: [u8; 11] = [
     0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36,
 ];
 
-fn substitute(byte: BoolByte) -> BoolByte {
+fn substitute(byte: &BoolByteFhe) -> BoolByteFhe {
+    if true {
+        let mut int_byte = IntByteFhe::bootstrap_from_bool_byte(&byte);
+        let context = int_byte.context.clone();
+
+        let byte_clear1 = u8::from(fhe_decrypt_byte(&context.client_key, byte));
+        let byte_clear2 = context.client_key.decrypt(&int_byte.ct);
+        println!("bool byte {}, bootstrapped int byte {}", byte_clear1, byte_clear2);
+
+        if true {
+            let lut = context
+                .server_key
+                .generate_lookup_table(|byte| SBOX[byte as usize].into());
+            int_byte.apply_lookup_table_assign(&lut);
+        } else {
+            let byte_clear = context.client_key.decrypt(&int_byte.ct);
+            let byte_clear = SBOX[byte_clear as usize].into();
+            int_byte.ct = context.client_key.encrypt(byte_clear);
+        }
+
+        let bool_byte = BoolByteFhe::bootstrap_from_int_byte(&int_byte);
+
+        let byte_clear1 = u8::from(fhe_decrypt_byte(&context.client_key, &bool_byte));
+        let byte_clear2 = context.client_key.decrypt(&int_byte.ct);
+        println!("int byte {}, bootstrapped bool byte {}", byte_clear2, byte_clear1);
+
+        bool_byte
+    } else {
+        let context = &byte.bits().next().unwrap().context;
+        let byte_clear = fhe_decrypt_byte(&context.client_key, byte);
+
+        let byte_clear = SBOX[u8::from(byte_clear) as usize].into();
+
+        fhe_encrypt_byte(&context.client_key, context, byte_clear)
+    }
+}
+
+fn substitute_plain(byte: BoolByte) -> BoolByte {
     SBOX[u8::from(byte) as usize].into()
 }
 
@@ -55,10 +90,10 @@ fn xor_state(state: &mut StateFhe, key: &[WordFhe; 4]) {
     }
 }
 
-fn sub_bytes(state: &mut State) {
-    for byte in state.bytes_mut() {
-        *byte = substitute(*byte);
-    }
+fn sub_bytes(state: &mut StateFhe) {
+    state.bytes_mut().par_bridge().for_each(|byte| {
+        *byte = substitute(byte);
+    })
 }
 
 fn shift_rows(state: &mut StateFhe) {
@@ -145,20 +180,20 @@ pub fn encrypt_block(
 ) -> BlockFhe {
     let mut state_fhe = StateFhe::from_array(block);
 
-    let expanded_key = fhe_model::fhe_decrypt_word_array(&context.client_key, expanded_key_fhe);
-
     xor_state(
         &mut state_fhe,
         expanded_key_fhe[0..4].try_into().expect("array length 4"),
     );
 
     for i in 1..rounds {
-        let mut state = fhe_model::fhe_decrypt_state(context, state_fhe);
-        sub_bytes(&mut state);
-        state_fhe = fhe_model::fhe_encrypt_state(context, state);
-
+        println!("starting round");
+        println!("sub_bytes");
+        sub_bytes(&mut state_fhe);
+        println!("shift_rows");
         shift_rows(&mut state_fhe);
+        println!("mix_columns");
         mix_columns(context, &mut state_fhe);
+        println!("xor_state");
         xor_state(
             &mut state_fhe,
             expanded_key_fhe[i * 4..(i + 1) * 4]
@@ -167,11 +202,12 @@ pub fn encrypt_block(
         );
     }
 
-    let mut state = fhe_model::fhe_decrypt_state(context, state_fhe);
-    sub_bytes(&mut state);
-    let mut state_fhe = fhe_model::fhe_encrypt_state(context, state);
-
+    println!("starting last round");
+    println!("sub_bytes");
+    sub_bytes(&mut state_fhe);
+    println!("shift_rows");
     shift_rows(&mut state_fhe);
+    println!("xor_state");
     xor_state(
         &mut state_fhe,
         expanded_key_fhe[40..44].try_into().expect("array length 4"),
@@ -208,7 +244,7 @@ pub fn key_schedule(key_slice: &Key) -> [Word; 44] {
 
 fn sub_word(mut word: Word) -> Word {
     for byte in word.bytes_mut() {
-        *byte = substitute(*byte);
+        *byte = substitute_plain(*byte);
     }
     word
 }
@@ -216,30 +252,34 @@ fn sub_word(mut word: Word) -> Word {
 static BOOL_FHE_DEFAULT: OnceLock<BoolFhe> = OnceLock::new();
 static INT_BYTE_FHE_DEFAULT: OnceLock<IntByteFhe> = OnceLock::new();
 
-const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
-    lwe_dimension: LweDimension(692),
-    glwe_dimension: GlweDimension(4),
-    polynomial_size: PolynomialSize(512),
+const PARAMS8: ClassicPBSParameters = ClassicPBSParameters {
+    lwe_dimension: LweDimension(1091),
+    glwe_dimension: GlweDimension(1),
+    polynomial_size: PolynomialSize(32768),
     lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-        3.5539902359442825e-06,
+        3.038278019865525e-08,
     )),
     glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-        2.845267479601915e-15,
+        2.168404344971009e-19,
     )),
-    pbs_base_log: DecompositionBaseLog(12),
-    pbs_level: DecompositionLevelCount(3),
-    ks_base_log: DecompositionBaseLog(3),
-    ks_level: DecompositionLevelCount(4),
-    message_modulus: MessageModulus(2),
+    pbs_base_log: DecompositionBaseLog(6),
+    pbs_level: DecompositionLevelCount(6),
+    ks_base_log: DecompositionBaseLog(2),
+    ks_level: DecompositionLevelCount(11),
+    message_modulus: MessageModulus(256),
     carry_modulus: CarryModulus(1),
-    max_noise_level: MaxNoiseLevel::new(20),
+    max_noise_level: MaxNoiseLevel::new(10),
     log2_p_fail: -64.074,
     ciphertext_modulus: CiphertextModulus::new_native(),
     encryption_key_choice: EncryptionKeyChoice::Big,
 };
 
 pub fn encrypt_single_block(key: Key, block: Block, rounds: usize) -> Block {
-    let (client_key, server_key) = shortint::gen_keys(PARAMS);
+    println!("start");
+
+    let (client_key, server_key) = shortint::gen_keys(PARAMS8);
+
+    println!("keys generated");
 
     let context = FheContext {
         client_key: client_key.into(),
@@ -262,6 +302,8 @@ pub fn encrypt_single_block(key: Key, block: Block, rounds: usize) -> Block {
 
     let key_fhe = fhe_model::fhe_encrypt_byte_array(&context.client_key, &context, &key);
     let block_fhe = fhe_model::fhe_encrypt_byte_array(&context.client_key, &context, &block);
+
+    println!("aes key and block encrypted");
 
     let start = Instant::now();
 
@@ -337,10 +379,10 @@ mod test {
     }
 
     use crate::impls;
-    use crate::impls::tfhe_shortint;
+    use crate::impls::tfhe_pbssub_shortint;
 
     #[test]
     fn test_tfhe_pbssub_shortint() {
-        impls::test::test_vs_plain(tfhe_shortint::encrypt_single_block, 2);
+        impls::test::test_vs_plain(tfhe_pbssub_shortint::encrypt_single_block, 2);
     }
 }
