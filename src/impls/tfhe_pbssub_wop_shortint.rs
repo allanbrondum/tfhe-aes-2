@@ -2,18 +2,18 @@ mod fhe_model;
 mod model;
 
 use crate::impls::tfhe_pbssub_wop_shortint::fhe_model::{
-    fhe_decrypt_byte, fhe_encrypt_byte, BlockFhe, BoolByteFhe, BoolFhe, IntByteFhe, StateFhe,
-    WordFhe,
+    fhe_decrypt_byte, fhe_decrypt_word_array, fhe_encrypt_byte, fhe_encrypt_word_array, BlockFhe,
+    BoolByteFhe, BoolFhe, IntByteFhe, StateFhe, WordFhe,
 };
 use crate::impls::tfhe_pbssub_wop_shortint::model::{BoolByte, State, Word};
 use crate::{Block, Key};
-use rayon::iter::ParallelIterator;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelBridge};
+use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use std::fmt::{Debug, Formatter};
-use std::mem;
 use std::ops::{BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
+use std::{array, mem};
 use tfhe::core_crypto::prelude::{
     CiphertextModulus, DecompositionBaseLog, DecompositionLevelCount, DynamicDistribution,
     GlweDimension, LweDimension, PolynomialSize, StandardDev,
@@ -91,7 +91,7 @@ fn sub_bytes(state: &mut StateFhe) {
         .bytes_mut()
         .par_bridge()
         .map(|state_byte| (substitute_part1(state_byte), state_byte))
-        .for_each(|( byte, state_byte)| {
+        .for_each(|(byte, state_byte)| {
             *state_byte = substitute_part2(byte);
         })
 }
@@ -216,7 +216,53 @@ pub fn encrypt_block(
     state_fhe.into_array()
 }
 
-pub fn key_schedule(key_slice: &Key) -> [Word; 44] {
+pub fn key_schedule(context: &FheContext, key_slice: &[BoolByteFhe; 16]) -> [WordFhe; 44] {
+    let mut key: [WordFhe; 4] = Default::default();
+    let mut expanded_key: [WordFhe; 44] = array::from_fn(|_| WordFhe::default());
+
+    for i in 0..4 {
+        for j in 0..4 {
+            expanded_key[i][j] = key_slice[i * 4 + j].clone();
+        }
+    }
+
+    // expanded_key[..4].clone_from_slice(&key);
+
+    for i in 4..44 {
+        if i % 4 == 0 {
+            expanded_key[i] =
+                expanded_key[i - 4].clone() ^ &sub_word(expanded_key[i - 1].clone().rotate_left(1));
+            expanded_key[i][0] ^= &BoolByteFhe::trivial(RC[i / 4], context.clone());
+        } else {
+            expanded_key[i] = expanded_key[i - 4].clone() ^ &expanded_key[i - 1];
+        }
+
+        // bootstrap all words to control noise level
+        if i % 4 == 3 {
+            expanded_key[i - 3..=i].par_iter_mut().for_each(|word| {
+                boot_word(word);
+            });
+        }
+    }
+
+    // static IDENTITY_LUT: OnceLock<ShortintWopbsLUT> = OnceLock::new();
+    //
+    // expanded_key
+    //     .iter_mut()
+    //     .flat_map(|word| word.bytes_mut())
+    //     .par_bridge()
+    //     .for_each(|byte| {
+    //         let lut = IDENTITY_LUT
+    //             .get_or_init(|| IntByteFhe::generate_lookup_table(context, |byte| byte));
+    //         *byte = BoolByteFhe::bootstrap_from_int_byte(&IntByteFhe::bootstrap_from_bool_byte(
+    //             &byte, lut,
+    //         ));
+    //     });
+
+    expanded_key
+}
+
+pub fn key_schedule_plain(key_slice: &Key) -> [Word; 44] {
     let mut key: [Word; 4] = Default::default();
     let mut expanded_key: [Word; 44] = [Word::zero(); 44];
 
@@ -233,7 +279,7 @@ pub fn key_schedule(key_slice: &Key) -> [Word; 44] {
             let mut rcon = Word::default();
             rcon[0] = RC[i / 4].into();
             expanded_key[i] =
-                expanded_key[i - 4] ^ sub_word(expanded_key[i - 1].rotate_left(1)) ^ rcon;
+                expanded_key[i - 4] ^ sub_word_plain(expanded_key[i - 1].rotate_left(1)) ^ rcon;
         } else {
             expanded_key[i] = expanded_key[i - 4] ^ expanded_key[i - 1];
         }
@@ -242,10 +288,44 @@ pub fn key_schedule(key_slice: &Key) -> [Word; 44] {
     expanded_key
 }
 
-fn sub_word(mut word: Word) -> Word {
-    for byte in word.bytes_mut() {
+fn boot_word(word: &mut WordFhe) {
+    word.bytes_mut().par_bridge().for_each(|byte| {
+        *byte = boot_byte(byte);
+    });
+}
+
+fn boot_byte(byte: &BoolByteFhe) -> BoolByteFhe {
+    let context = &byte.bits().next().unwrap().context;
+
+    static IDENTITY_LUT: OnceLock<ShortintWopbsLUT> = OnceLock::new();
+
+    let lut = IDENTITY_LUT.get_or_init(|| IntByteFhe::generate_lookup_table(context, |byte| byte));
+    let start = Instant::now();
+    let int_byte = IntByteFhe::bootstrap_from_bool_byte(&byte, &lut);
+    println!("boot int {:?}", start.elapsed());
+
+    let start = Instant::now();
+    let bool_byte = BoolByteFhe::bootstrap_from_int_byte(&int_byte);
+    println!("boot bools {:?}", start.elapsed());
+
+    bool_byte
+}
+
+fn sub_word(mut word: WordFhe) -> WordFhe {
+    word.bytes_mut()
+        .par_bridge()
+        .map(|word_byte| (substitute_part1(word_byte), word_byte))
+        .for_each(|(byte, word_byte)| {
+            *word_byte = substitute_part2(byte);
+        });
+
+    word
+}
+
+fn sub_word_plain(mut word: Word) -> Word {
+    word.bytes_mut().par_bridge().for_each(|byte| {
         *byte = substitute_plain(*byte);
-    }
+    });
     word
 }
 
@@ -334,10 +414,17 @@ pub fn encrypt_single_block(key: Key, block: Block, rounds: usize) -> Block {
 
     let start = Instant::now();
 
-    let key_schedule = key_schedule(&key);
+    let key_schedule_fhe = key_schedule(&context, &key_fhe);
+
+    let key_schedule_plain = key_schedule_plain(&key);
+    let key_schedule_decrypted = fhe_decrypt_word_array(&context.client_key, &key_schedule_fhe);
+    if key_schedule_decrypted != key_schedule_plain {
+        eprintln!("wrong key schedule encryption");
+        panic!();
+    }
 
     let key_schedule_fhe =
-        fhe_model::fhe_encrypt_word_array(&context.client_key, &context, &key_schedule);
+        fhe_encrypt_word_array(&context.client_key, &context, &key_schedule_plain);
 
     println!("key schedule created {:?}", start.elapsed());
 
@@ -411,14 +498,21 @@ mod test {
 
     #[test]
     fn test_tfhe_pbssub_wop_shortint_two_rounds() {
-        rayon::ThreadPoolBuilder::new().num_threads(16).build_global().unwrap();
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(16)
+            .build_global()
+            .unwrap();
+        println!("current_num_threads: {}", rayon::current_num_threads());
 
         impls::test::test_vs_plain(tfhe_pbssub_wop_shortint::encrypt_single_block, 2);
     }
 
     #[test]
     fn test_tfhe_pbssub_wop_shortint_all_rounds() {
-        rayon::ThreadPoolBuilder::new().num_threads(16).build_global().unwrap();
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(16)
+            .build_global()
+            .unwrap();
 
         impls::test::test_vs_plain(tfhe_pbssub_wop_shortint::encrypt_single_block, ROUNDS);
     }

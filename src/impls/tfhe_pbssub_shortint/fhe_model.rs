@@ -3,10 +3,14 @@ use crate::impls::tfhe_pbssub_shortint::{FheContext, BOOL_FHE_DEFAULT, INT_BYTE_
 use rayon::iter::ParallelIterator;
 use rayon::iter::{IntoParallelRefIterator, ParallelBridge};
 use std::fmt::{Debug, Formatter};
-use std::mem;
 use std::ops::{BitAnd, BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
+use std::{fmt, mem};
+use tfhe::core_crypto::entities::Plaintext;
+use tfhe::core_crypto::prelude::lwe_encryption;
 use tfhe::shortint;
+use tfhe::shortint::encoding::{PaddingBit, ShortintEncoding};
 use tfhe::shortint::server_key::LookupTableOwned;
+use tfhe::shortint::{encoding, ClientKey};
 
 pub type BlockFhe = [BoolByteFhe; 16];
 
@@ -24,7 +28,37 @@ impl BoolFhe {
 
 impl Debug for BoolFhe {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BoolFhe").field("fhe", &self.ct).finish()
+        write!(
+            f,
+            "BoolFhe: {:?}",
+            DebugShortintWrapper(&self.context.client_key, &self.ct)
+        )
+    }
+}
+
+struct DebugShortintWrapper<'a>(&'a shortint::ClientKey, &'a shortint::Ciphertext);
+
+impl Debug for DebugShortintWrapper<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let plaintext: Plaintext<u64> = lwe_encryption::decrypt_lwe_ciphertext(
+            &self.0.glwe_secret_key.as_lwe_secret_key(),
+            &self.1.ct,
+        );
+        let decoded = self.0.decrypt_message_and_carry(&self.1);
+
+        let delta = encoding::compute_delta(
+            self.0.parameters.ciphertext_modulus(),
+            self.0.parameters.message_modulus(),
+            self.0.parameters.carry_modulus(),
+            PaddingBit::Yes,
+        );
+
+        let noise = (plaintext.0 as i64 - delta as i64 * decoded as i64);
+        write!(
+            f,
+            "{}\nplaintext: {:64b}\nnoise:     {:64b}",
+            decoded, plaintext.0, noise
+        )
     }
 }
 
@@ -468,6 +502,7 @@ pub fn fhe_encrypt_state(context: &FheContext, state: State) -> StateFhe {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::io::stdout;
     use std::sync::Arc;
     use std::time::Instant;
     use tfhe::core_crypto::prelude::*;
@@ -671,9 +706,12 @@ mod test {
         for i in 0..1000000 {
             let scalar = 85;
             let mut b1 = client_key.encrypt(3);
+            println!("before: {:?}", DebugShortintWrapper(&client_key, &b1));
             context
                 .server_key
                 .unchecked_scalar_mul_assign(&mut b1, scalar);
+            println!("after: {:?}", DebugShortintWrapper(&client_key, &b1));
+
             let decrypted = client_key.decrypt(&b1);
             assert_eq!(decrypted, (scalar * 3) as u64);
             println!("check {}", i);
@@ -712,10 +750,12 @@ mod test {
 
         for i in 0..1000000 {
             let mut b1 = client_key.encrypt(3);
+            println!("before: {:?}", DebugShortintWrapper(&client_key, &b1));
             let b2 = client_key.encrypt(1);
             for _ in 0..250 {
                 context.server_key.unchecked_add_assign(&mut b1, &b2);
             }
+            println!("after: {:?}", DebugShortintWrapper(&client_key, &b1));
 
             let decrypted = client_key.decrypt(&b1);
             assert_eq!(decrypted, 253);

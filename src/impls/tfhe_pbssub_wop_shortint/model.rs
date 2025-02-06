@@ -1,6 +1,6 @@
 use std::ops::{BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
 
-#[derive(Debug, Default, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct BoolByte(pub [bool; 8]);
 
 impl BoolByte {
@@ -72,7 +72,7 @@ impl From<BoolByte> for u8 {
     }
 }
 
-#[derive(Debug, Default, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct Word(pub [BoolByte; 4]);
 
 impl Word {

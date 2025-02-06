@@ -201,7 +201,7 @@ impl<'a> ColumnView<'a> {
 #[derive(Debug)]
 pub struct ColumnViewMut<'a>(usize, &'a mut [Word; 4]);
 
-impl<'a> ColumnViewMut<'a> {
+impl ColumnViewMut<'_> {
     pub fn bytes(&self) -> impl Iterator<Item = BoolByte> + '_ {
         (0..4).map(|i| self.1[i][self.0])
     }

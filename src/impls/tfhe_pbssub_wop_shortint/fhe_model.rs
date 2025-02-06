@@ -3,32 +3,42 @@ use crate::impls::tfhe_pbssub_wop_shortint::{FheContext, BOOL_FHE_DEFAULT, INT_B
 use rayon::iter::ParallelIterator;
 use rayon::iter::{IntoParallelRefIterator, ParallelBridge};
 use std::fmt::{Debug, Formatter};
-use std::mem;
 use std::ops::{BitAnd, BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
 use std::time::Instant;
+use std::{fmt, mem};
 use tfhe::core_crypto::algorithms::{lwe_encryption, lwe_linear_algebra};
-use tfhe::core_crypto::entities::{LweCiphertextCreationMetadata, LweCiphertextOwned};
+use tfhe::core_crypto::entities::{
+    lwe_ciphertext, LweCiphertextCreationMetadata, LweCiphertextOwned,
+};
 use tfhe::core_crypto::prelude::{
     CiphertextCount, CiphertextModulus, ContiguousEntityContainer, CreateFrom, DeltaLog,
     ExtractedBitsCount, LweCiphertextListCreationMetadata, LweCiphertextListOwned, Plaintext,
 };
+use tfhe::shortint;
 use tfhe::shortint::ciphertext::{Degree, NoiseLevel};
 use tfhe::shortint::engine::ShortintEngine;
-use tfhe::shortint::wopbs::{ShortintWopbsLUT, WopbsLUTBase};
+use tfhe::shortint::wopbs::ShortintWopbsLUT;
 use tfhe::shortint::PBSOrder;
-use tfhe::{shortint, FheBool};
+
+const NOISE_ASSERT: bool = true;
+const PLAIN_CHECK: bool = true;
 
 pub type BlockFhe = [BoolByteFhe; 16];
 
 #[derive(Clone)]
 pub struct BoolFhe {
     ct: LweCiphertextOwned<u64>,
+    noise_level: NoiseLevel,
     pub context: FheContext,
 }
 
 impl BoolFhe {
     pub fn new(fhe: LweCiphertextOwned<u64>, context: FheContext) -> Self {
-        Self { ct: fhe, context }
+        Self {
+            ct: fhe,
+            noise_level: NoiseLevel::NOMINAL,
+            context,
+        }
     }
 
     pub fn trivial(b: bool, context: FheContext) -> Self {
@@ -42,7 +52,11 @@ impl BoolFhe {
             CiphertextModulus::new_native(),
         );
 
-        Self { ct, context }
+        Self {
+            ct,
+            noise_level: NoiseLevel::ZERO,
+            context,
+        }
     }
 
     pub fn encode(b: bool) -> Plaintext<u64> {
@@ -52,11 +66,46 @@ impl BoolFhe {
     pub fn decode(encoding: Plaintext<u64>) -> bool {
         ((encoding.0.wrapping_add(1 << 62)) & (1 << 63)) != 0
     }
+
+    fn set_noise_level(&mut self, noise_level: NoiseLevel) {
+        if NOISE_ASSERT {
+            self.context
+                .server_key
+                .max_noise_level
+                .validate(noise_level)
+                .unwrap();
+        }
+        self.noise_level = noise_level;
+    }
 }
 
 impl Debug for BoolFhe {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BoolFhe").field("fhe", &self.ct).finish()
+        write!(
+            f,
+            "BoolFhe: noise_level: {:?} {:?}",
+            self.noise_level,
+            DebugLweCiphertextWrapper(&self.context.client_key, self.ct.as_view())
+        )
+    }
+}
+
+struct DebugLweCiphertextWrapper<'a>(
+    &'a shortint::ClientKey,
+    lwe_ciphertext::LweCiphertextView<'a, u64>,
+);
+
+impl Debug for DebugLweCiphertextWrapper<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let plaintext: Plaintext<u64> =
+            lwe_encryption::decrypt_lwe_ciphertext(&self.0.lwe_secret_key, &self.1);
+        let decoded = BoolFhe::decode(plaintext);
+        let noise = plaintext.0.wrapping_sub(BoolFhe::encode(decoded).0);
+        write!(
+            f,
+            "{}\nplaintext: {:64b}\nnoise:     {:64b}",
+            decoded, plaintext.0, noise
+        )
     }
 }
 
@@ -68,7 +117,30 @@ impl Default for BoolFhe {
 
 impl BitXorAssign<&BoolFhe> for BoolFhe {
     fn bitxor_assign(&mut self, rhs: &Self) {
+        let self_before = if PLAIN_CHECK {
+            Some(self.clone())
+        } else {
+            None
+        };
+
         lwe_linear_algebra::lwe_ciphertext_add_assign(&mut self.ct, &rhs.ct);
+
+        if PLAIN_CHECK {
+            let self_plain =
+                fhe_decrypt_bool(&self.context.client_key, self_before.as_ref().unwrap());
+            let rhs_plain = fhe_decrypt_bool(&self.context.client_key, rhs);
+            let res_plain = fhe_decrypt_bool(&self.context.client_key, self);
+            assert_eq!(
+                self_plain ^ rhs_plain,
+                res_plain,
+                "xor lhs: {:?}, \nrhs: {:?}, \nres: {:?}",
+                self_before.as_ref().unwrap(),
+                rhs,
+                self
+            );
+        }
+
+        self.set_noise_level(self.noise_level + rhs.noise_level);
     }
 }
 
@@ -85,6 +157,14 @@ impl BitXor for BoolFhe {
 pub struct BoolByteFhe([BoolFhe; 8]);
 
 impl BoolByteFhe {
+    pub fn trivial(val: u8, context: FheContext) -> Self {
+        let mut byte = BoolByteFhe::default();
+        for i in 0..8 {
+            byte[i] = BoolFhe::trivial(0 != (val & (0x80 >> i)), context.clone());
+        }
+        byte
+    }
+
     pub fn shl_assign_1(&mut self) -> BoolFhe {
         let ret = mem::take(&mut self.0[0]);
         self.shl_assign(1);
@@ -403,14 +483,23 @@ impl IndexMut<usize> for WordFhe {
     }
 }
 
-impl BitXorAssign for WordFhe {
-    fn bitxor_assign(&mut self, rhs: Self) {
+impl BitXorAssign<&Self> for WordFhe {
+    fn bitxor_assign(&mut self, rhs: &Self) {
         self.bytes_mut()
             .zip(rhs.bytes())
             .par_bridge()
             .for_each(|(byte, rhs_byte)| {
                 *byte ^= rhs_byte;
             });
+    }
+}
+
+impl BitXor<&WordFhe> for WordFhe {
+    type Output = WordFhe;
+
+    fn bitxor(mut self, rhs: &Self) -> Self::Output {
+        self.bitxor_assign(rhs);
+        self
     }
 }
 
@@ -594,7 +683,7 @@ mod test {
             message_modulus: MessageModulus(256),
             carry_modulus: CarryModulus(1),
             ciphertext_modulus: CiphertextModulus::new_native(),
-            encryption_key_choice: EncryptionKeyChoice::Big,
+            encryption_key_choice: EncryptionKeyChoice::Small,
         };
 
         let pbs_params = ClassicPBSParameters {
@@ -685,9 +774,49 @@ mod test {
             fhe_decrypt_bool(&client_key, &(b2.clone() ^ b2.clone())),
             false
         );
+
+        // default/trivial
+        assert_eq!(fhe_decrypt_bool(&client_key, &BoolFhe::default()), false);
         assert_eq!(
             fhe_decrypt_bool(&client_key, &(b2.clone() ^ BoolFhe::default())),
             true
+        );
+        assert_eq!(
+            fhe_decrypt_bool(&client_key, &BoolFhe::trivial(false, context.clone())),
+            false
+        );
+        assert_eq!(
+            fhe_decrypt_bool(&client_key, &BoolFhe::trivial(true, context.clone())),
+            true
+        );
+    }
+
+    #[test]
+    fn test_pbssub_wop_shortint_bool_byte_fhe() {
+        let (client_key, context) = KEYS.clone();
+
+        // default/trivial
+        assert_eq!(
+            u8::from(fhe_decrypt_byte(&client_key, &BoolByteFhe::default())),
+            0
+        );
+        assert_eq!(
+            u8::from(fhe_decrypt_byte(
+                &client_key,
+                &BoolByteFhe::trivial(123, context.clone())
+            )),
+            123
+        );
+    }
+
+    #[test]
+    fn test_pbssub_wop_shortint_word_fhe() {
+        let (client_key, context) = KEYS.clone();
+
+        // default/trivial
+        assert_eq!(
+            fhe_decrypt_byte_array(&client_key, &WordFhe::default().0),
+            [0, 0, 0, 0]
         );
     }
 
