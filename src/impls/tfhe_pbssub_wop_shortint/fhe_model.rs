@@ -1,24 +1,55 @@
-use crate::impls::tfhe_pbssub_shortint::model::{BoolByte, State, Word};
-use crate::impls::tfhe_pbssub_shortint::{FheContext, BOOL_FHE_DEFAULT, INT_BYTE_FHE_DEFAULT};
+use crate::impls::tfhe_pbssub_wop_shortint::model::{BoolByte, State, Word};
+use crate::impls::tfhe_pbssub_wop_shortint::{FheContext, BOOL_FHE_DEFAULT, INT_BYTE_FHE_DEFAULT};
 use rayon::iter::ParallelIterator;
 use rayon::iter::{IntoParallelRefIterator, ParallelBridge};
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::ops::{BitAnd, BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
-use tfhe::shortint;
-use tfhe::shortint::server_key::LookupTableOwned;
+use tfhe::core_crypto::algorithms::{lwe_encryption, lwe_linear_algebra};
+use tfhe::core_crypto::entities::{LweCiphertextCreationMetadata, LweCiphertextOwned};
+use tfhe::core_crypto::prelude::{
+    CiphertextCount, CiphertextModulus, ContiguousEntityContainer, CreateFrom, DeltaLog,
+    ExtractedBitsCount, LweCiphertextListCreationMetadata, LweCiphertextListOwned, Plaintext,
+};
+use tfhe::shortint::ciphertext::{Degree, NoiseLevel};
+use tfhe::shortint::engine::ShortintEngine;
+use tfhe::shortint::wopbs::{ShortintWopbsLUT, WopbsLUTBase};
+use tfhe::shortint::PBSOrder;
+use tfhe::{shortint, FheBool};
 
 pub type BlockFhe = [BoolByteFhe; 16];
 
 #[derive(Clone)]
 pub struct BoolFhe {
-    pub ct: shortint::ciphertext::Ciphertext,
+    ct: LweCiphertextOwned<u64>,
     pub context: FheContext,
 }
 
 impl BoolFhe {
-    pub fn new(fhe: shortint::ciphertext::Ciphertext, context: FheContext) -> Self {
+    pub fn new(fhe: LweCiphertextOwned<u64>, context: FheContext) -> Self {
         Self { ct: fhe, context }
+    }
+
+    pub fn trivial(b: bool, context: FheContext) -> Self {
+        let ct = lwe_encryption::allocate_and_trivially_encrypt_new_lwe_ciphertext(
+            context
+                .server_key
+                .bootstrapping_key
+                .input_lwe_dimension()
+                .to_lwe_size(),
+            Self::encode(b),
+            CiphertextModulus::new_native(),
+        );
+
+        Self { ct, context }
+    }
+
+    pub fn encode(b: bool) -> Plaintext<u64> {
+        Plaintext(u64::from(b) << 63)
+    }
+
+    pub fn decode(encoding: Plaintext<u64>) -> bool {
+        ((encoding.0.wrapping_add(1 << 62)) & (1 << 63)) != 0
     }
 }
 
@@ -36,9 +67,7 @@ impl Default for BoolFhe {
 
 impl BitXorAssign<&BoolFhe> for BoolFhe {
     fn bitxor_assign(&mut self, rhs: &Self) {
-        self.context
-            .server_key
-            .unchecked_add_assign(&mut self.ct, &rhs.ct);
+        lwe_linear_algebra::lwe_ciphertext_add_assign(&mut self.ct, &rhs.ct);
     }
 }
 
@@ -72,17 +101,29 @@ impl BoolByteFhe {
     pub fn bootstrap_from_int_byte(int_byte: &IntByteFhe) -> Self {
         let context = &int_byte.context;
 
-        let mut res = Self::default();
-        for (index, bit) in res.bits_mut().enumerate() {
-            let lut = context
-                .server_key
-                .generate_lookup_table(|unscaled| (unscaled >> (8 - index - 1)) & 1);
-            *bit = BoolFhe::new(
-                context.server_key.apply_lookup_table(&int_byte.ct, &lut),
-                context.clone(),
-            );
-        }
-        res
+        let bit_cts =
+            context
+                .wopbs_key
+                .extract_bits(DeltaLog(64 - 8), &int_byte.ct, ExtractedBitsCount(8));
+
+        let bool_fhe_array = bit_cts
+            .iter()
+            .map(|bit_ct| {
+                BoolFhe::new(
+                    LweCiphertextOwned::create_from(
+                        bit_ct.into_container().to_vec(),
+                        LweCiphertextCreationMetadata {
+                            ciphertext_modulus: CiphertextModulus::new_native(),
+                        },
+                    ),
+                    context.clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("array length 8");
+
+        Self(bool_fhe_array)
     }
 }
 
@@ -152,27 +193,55 @@ impl Default for IntByteFhe {
 }
 
 impl IntByteFhe {
-    pub fn bootstrap_from_bool_byte(bool_byte: &BoolByteFhe) -> Self {
-        let mut res = Self::default();
-        let context = &res.context;
+    pub fn bootstrap_from_bool_byte(bool_byte: &BoolByteFhe, lut: &ShortintWopbsLUT) -> Self {
+        assert_eq!(lut.as_ref().output_ciphertext_count(), CiphertextCount(1));
+        let context = &bool_byte.bits().next().unwrap().context;
 
-        for (index, bit) in bool_byte.bits().enumerate() {
-            // todo move to static lazy
-            let lut = context
-                .server_key
-                .generate_lookup_table(|unscaled| (unscaled & 1) << (8 - index - 1));
-            let scaled = context.server_key.apply_lookup_table(&bit.ct, &lut);
-            context
-                .server_key
-                .unchecked_add_assign(&mut res.ct, &scaled);
+        let lwe_size = bool_byte.bits().next().unwrap().ct.lwe_size();
+
+        let bit_cts = bool_byte.bits().map(|bit| bit.ct.as_view());
+        let bits_data: Vec<u64> = bit_cts
+            .flat_map(|bit_ct| bit_ct.into_container().iter().copied())
+            .collect();
+
+        let bits_list_ct = LweCiphertextListOwned::create_from(
+            bits_data,
+            LweCiphertextListCreationMetadata {
+                lwe_size,
+                ciphertext_modulus: CiphertextModulus::new_native(),
+            },
+        );
+
+        let lwe_ct = context
+            .wopbs_key
+            .circuit_bootstrapping_vertical_packing(lut.as_ref(), &bits_list_ct)
+            .into_iter()
+            .next()
+            .expect("one element");
+
+        let sks = &context.wopbs_key.wopbs_server_key;
+
+        let ct = shortint::Ciphertext::new(
+            lwe_ct,
+            Degree::new(sks.message_modulus.0 - 1),
+            NoiseLevel::NOMINAL,
+            sks.message_modulus,
+            sks.carry_modulus,
+            PBSOrder::KeyswitchBootstrap,
+        );
+
+        Self {
+            ct,
+            context: context.clone(),
         }
-        res
     }
 
-    pub fn apply_lookup_table_assign(&mut self, acc: &LookupTableOwned) {
-        self.context
-            .server_key
-            .apply_lookup_table_assign(&mut self.ct, acc);
+    pub fn generate_lookup_table(context: &FheContext, f: impl Fn(u64) -> u64) -> ShortintWopbsLUT {
+        let ct = context.server_key.create_trivial(0);
+        context
+            .wopbs_key
+            .generate_lut_without_padding(&ct, f)
+            .into()
     }
 }
 
@@ -397,7 +466,22 @@ pub fn fhe_encrypt_bool(
     context: &FheContext,
     b: bool,
 ) -> BoolFhe {
-    BoolFhe::new(client_key.encrypt(b.into()), context.clone())
+    let (encryption_lwe_sk, encryption_noise_distribution) = (
+        &client_key.lwe_secret_key,
+        client_key.parameters.lwe_noise_distribution(),
+    );
+
+    let ct = ShortintEngine::with_thread_local_mut(|engine| {
+        lwe_encryption::allocate_and_encrypt_new_lwe_ciphertext(
+            &encryption_lwe_sk,
+            BoolFhe::encode(b),
+            encryption_noise_distribution,
+            client_key.parameters.ciphertext_modulus(),
+            &mut engine.encryption_generator,
+        )
+    });
+
+    BoolFhe::new(ct, context.clone())
 }
 
 pub fn fhe_decrypt_word_array<const N: usize>(
@@ -451,8 +535,9 @@ pub fn fhe_decrypt_byte(
 }
 
 pub fn fhe_decrypt_bool(client_key: &shortint::client_key::ClientKey, b: &BoolFhe) -> bool {
-    let val = client_key.decrypt(&b.ct) & 1;
-    (val & 1) != 0
+    let lwe_decryption_key = &client_key.lwe_secret_key;
+    let encoding = lwe_encryption::decrypt_lwe_ciphertext(&lwe_decryption_key, &b.ct);
+    BoolFhe::decode(encoding)
 }
 
 pub fn fhe_decrypt_state(context: &FheContext, state_fhe: StateFhe) -> State {
@@ -468,55 +553,81 @@ pub fn fhe_encrypt_state(context: &FheContext, state: State) -> StateFhe {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::sync::Arc;
+    use std::sync::{Arc, LazyLock};
     use std::time::Instant;
     use tfhe::core_crypto::prelude::*;
-    use tfhe::shortint::parameters::{
-        V0_11_PARAM_MESSAGE_1_CARRY_7_KS_PBS_GAUSSIAN_2M64,
-        V0_11_PARAM_MESSAGE_2_CARRY_2_KS_PBS_GAUSSIAN_2M64,
-    };
-    use tfhe::shortint::{CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus};
-
-    // 8 bit
-    const PARAMS8: ClassicPBSParameters = ClassicPBSParameters {
-        lwe_dimension: LweDimension(1091),
-        glwe_dimension: GlweDimension(1),
-        polynomial_size: PolynomialSize(32768),
-        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            3.038278019865525e-08,
-        )),
-        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            2.168404344971009e-19,
-        )),
-        pbs_base_log: DecompositionBaseLog(6),
-        pbs_level: DecompositionLevelCount(6),
-        ks_base_log: DecompositionBaseLog(2),
-        ks_level: DecompositionLevelCount(11),
-        message_modulus: MessageModulus(256),
-        carry_modulus: CarryModulus(1),
-        max_noise_level: MaxNoiseLevel::new(10),
-        log2_p_fail: -64.074,
-        ciphertext_modulus: CiphertextModulus::new_native(),
-        encryption_key_choice: EncryptionKeyChoice::Big,
+    use tfhe::shortint::wopbs::WopbsKey;
+    use tfhe::shortint::{
+        CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus, ShortintParameterSet,
+        WopbsParameters,
     };
 
-    fn keys() -> (Arc<shortint::ClientKey>, FheContext) {
-        keys_with_params(PARAMS8)
+    fn params() -> ShortintParameterSet {
+        let wopbs_params = WopbsParameters {
+            lwe_dimension: LweDimension(750),
+            glwe_dimension: GlweDimension(2),
+            polynomial_size: PolynomialSize(1024),
+            lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+                1.5140301927925663e-05,
+            )),
+            glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+                0.00000000000000022148688116005568513645324585951,
+            )),
+            pbs_base_log: DecompositionBaseLog(5),
+            pbs_level: DecompositionLevelCount(8),
+            ks_level: DecompositionLevelCount(15),
+            ks_base_log: DecompositionBaseLog(1),
+            pfks_level: DecompositionLevelCount(4),
+            pfks_base_log: DecompositionBaseLog(10),
+            pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+                0.00000000000000022148688116005568513645324585951,
+            )),
+            cbs_level: DecompositionLevelCount(7),
+            cbs_base_log: DecompositionBaseLog(4),
+            message_modulus: MessageModulus(256),
+            carry_modulus: CarryModulus(1),
+            ciphertext_modulus: CiphertextModulus::new_native(),
+            encryption_key_choice: EncryptionKeyChoice::Big,
+        };
+
+        let pbs_params = ClassicPBSParameters {
+            lwe_dimension: wopbs_params.lwe_dimension,
+            glwe_dimension: wopbs_params.glwe_dimension,
+            polynomial_size: wopbs_params.polynomial_size,
+            lwe_noise_distribution: wopbs_params.lwe_noise_distribution,
+            glwe_noise_distribution: wopbs_params.glwe_noise_distribution,
+            pbs_base_log: wopbs_params.pbs_base_log,
+            pbs_level: wopbs_params.pbs_level,
+            ks_base_log: wopbs_params.ks_base_log,
+            ks_level: wopbs_params.ks_level,
+            message_modulus: wopbs_params.message_modulus,
+            carry_modulus: wopbs_params.carry_modulus,
+            max_noise_level: MaxNoiseLevel::new(10),
+            log2_p_fail: -64.074,
+            ciphertext_modulus: wopbs_params.ciphertext_modulus,
+            encryption_key_choice: wopbs_params.encryption_key_choice,
+        };
+
+        ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
     }
 
-    fn keys_with_params(params: ClassicPBSParameters) -> (Arc<shortint::ClientKey>, FheContext) {
-        let (client_key, server_key) = shortint::gen_keys(params);
+    static KEYS: LazyLock<(Arc<shortint::ClientKey>, FheContext)> = LazyLock::new(|| keys_impl());
+
+    fn keys_impl() -> (Arc<shortint::ClientKey>, FheContext) {
+        let (client_key, server_key) = shortint::gen_keys(params());
+
+        // println!("server key: {:#?}", server_key);
+
+        let wops_key = WopbsKey::new_wopbs_key_only_for_wopbs(&client_key, &server_key);
 
         let context = FheContext {
             client_key: client_key.clone().into(),
             server_key: server_key.into(),
+            wopbs_key: wops_key.into(),
         };
 
         BOOL_FHE_DEFAULT
-            .set(BoolFhe::new(
-                context.server_key.create_trivial(0),
-                context.clone(),
-            ))
+            .set(BoolFhe::trivial(false, context.clone()))
             .expect("only set once");
 
         INT_BYTE_FHE_DEFAULT
@@ -530,8 +641,24 @@ mod test {
     }
 
     #[test]
-    fn test_pbssub_shortint_bool_fhe() {
-        let (client_key, context) = keys();
+    fn test_bool_fhe_encode() {
+        assert_eq!(BoolFhe::encode(false), Plaintext(0));
+        assert_eq!(BoolFhe::encode(true), Plaintext(1 << 63));
+    }
+
+    #[test]
+    fn test_bool_fhe_decode() {
+        assert_eq!(BoolFhe::decode(Plaintext(0)), false);
+        assert_eq!(BoolFhe::decode(Plaintext(1)), false);
+        assert_eq!(BoolFhe::decode(Plaintext(u64::MAX)), false);
+        assert_eq!(BoolFhe::decode(Plaintext(1 << 63)), true);
+        assert_eq!(BoolFhe::decode(Plaintext((1 << 63) - 1)), true);
+        assert_eq!(BoolFhe::decode(Plaintext((1 << 63) + 1)), true);
+    }
+
+    #[test]
+    fn test_pbssub_wop_shortint_bool_fhe() {
+        let (client_key, context) = KEYS.clone();
 
         let mut b1 = fhe_encrypt_bool(&client_key, &context, false);
         let b2 = fhe_encrypt_bool(&client_key, &context, true);
@@ -551,23 +678,29 @@ mod test {
             fhe_decrypt_bool(&client_key, &(b2.clone() ^ b2.clone())),
             false
         );
+        assert_eq!(
+            fhe_decrypt_bool(&client_key, &(b2.clone() ^ BoolFhe::default())),
+            true
+        );
     }
 
     #[test]
-    fn test_pbssub_shortint_int_byte_boostrap_from_bool_byte_fhe() {
-        let (client_key, context) = keys();
+    fn test_pbssub_wop_shortint_int_byte_boostrap_from_bool_byte_fhe() {
+        let (client_key, context) = KEYS.clone();
 
         let bool_byte = BoolByte::from(0b10110101);
         let bool_byte_fhe = fhe_encrypt_byte(&client_key, &context, bool_byte);
-        let int_byte_fhe = IntByteFhe::bootstrap_from_bool_byte(&bool_byte_fhe);
 
-        let decrypted = client_key.decrypt(&int_byte_fhe.ct);
+        let lut = IntByteFhe::generate_lookup_table(&context, |val| val);
+        let int_byte_fhe = IntByteFhe::bootstrap_from_bool_byte(&bool_byte_fhe, &lut);
+
+        let decrypted = client_key.decrypt_without_padding(&int_byte_fhe.ct);
         assert_eq!(decrypted, 0b10110101);
     }
 
     #[test]
-    fn test_pbssub_shortint_int_byte_boostrap_from_bool_byte_fhe2() {
-        let (client_key, context) = keys();
+    fn test_pbssub_wop_shortint_int_byte_boostrap_from_bool_byte_fhe2() {
+        let (client_key, context) = KEYS.clone();
 
         let bool_byte = BoolByte::from(0b10110101);
         let bool_byte_fhe = fhe_encrypt_byte(&client_key, &context, bool_byte);
@@ -577,18 +710,33 @@ mod test {
 
         let bool_byte_fhe = bool_byte_fhe ^ bool_byte_fhe2.clone();
 
-        let int_byte_fhe = IntByteFhe::bootstrap_from_bool_byte(&bool_byte_fhe);
+        let lut = IntByteFhe::generate_lookup_table(&context, |val| val);
+        let int_byte_fhe = IntByteFhe::bootstrap_from_bool_byte(&bool_byte_fhe, &lut);
 
-        let decrypted_int = client_key.decrypt(&int_byte_fhe.ct) as u8;
+        let decrypted_int = client_key.decrypt_without_padding(&int_byte_fhe.ct) as u8;
         let decrypted_bool = u8::from(fhe_decrypt_byte(&client_key, &bool_byte_fhe));
         assert_eq!(decrypted_int, decrypted_bool);
     }
 
     #[test]
-    fn test_pbssub_shortint_bool_byte_boostrap_from_int_byte_fhe() {
-        let (client_key, context) = keys();
+    fn test_pbssub_wop_shortint_int_byte_boostrap_from_bool_byte_fhe_lut() {
+        let (client_key, context) = KEYS.clone();
 
-        let int_byte_fhe = IntByteFhe::new(client_key.encrypt(0b10110101), context);
+        let bool_byte = BoolByte::from(0b10110101);
+        let bool_byte_fhe = fhe_encrypt_byte(&client_key, &context, bool_byte);
+
+        let lut = IntByteFhe::generate_lookup_table(&context, |val| val + 3);
+        let int_byte_fhe = IntByteFhe::bootstrap_from_bool_byte(&bool_byte_fhe, &lut);
+
+        let decrypted = client_key.decrypt_without_padding(&int_byte_fhe.ct);
+        assert_eq!(decrypted, 0b10110101 + 3);
+    }
+
+    #[test]
+    fn test_pbssub_wop_shortint_bool_byte_boostrap_from_int_byte_fhe() {
+        let (client_key, context) = KEYS.clone();
+
+        let int_byte_fhe = IntByteFhe::new(client_key.encrypt_without_padding(0b10110101), context);
         let bool_byte_fhe = BoolByteFhe::bootstrap_from_int_byte(&int_byte_fhe);
 
         let bool_byte = fhe_decrypt_byte(&client_key, &bool_byte_fhe);
@@ -596,14 +744,14 @@ mod test {
     }
 
     #[test]
-    fn test_pbssub_shortint_perf() {
+    fn test_pbssub_wob_shortint_perf() {
         let start = Instant::now();
-        let (client_key, context) = keys();
+        let (client_key, context) = KEYS.clone();
         println!("keys generated: {:?}", start.elapsed());
 
         let start = Instant::now();
-        let mut b1 = client_key.encrypt(1);
-        let b2 = client_key.encrypt(3);
+        let mut b1 = client_key.encrypt_without_padding(1);
+        let b2 = client_key.encrypt_without_padding(3);
         println!(
             "data encrypted: {:?}, dim: {}",
             start.elapsed(),
@@ -614,112 +762,42 @@ mod test {
         context.server_key.unchecked_add_assign(&mut b1, &b2);
         println!("add elapsed: {:?}", start.elapsed());
 
+        let lut = context
+            .wopbs_key
+            .generate_lut_without_padding(&b1, |a| a)
+            .into();
         let start = Instant::now();
-        context.server_key.message_extract_assign(&mut b1);
+        _ = context
+            .wopbs_key
+            .programmable_bootstrapping_without_padding(&b1, &lut);
         println!("bootstrap elapsed: {:?}", start.elapsed());
     }
 
     #[test]
-    fn test_pbssub_shortint_bootstrap_negacyclic() {
+    fn test_pbssub_wob_shortint_extract_bits() {
         let start = Instant::now();
-        let (client_key, context) = keys();
+        let (client_key, context) = KEYS.clone();
         println!("keys generated: {:?}", start.elapsed());
 
-        let start = Instant::now();
-        let mut b1 = client_key.encrypt(128);
-        let b2 = client_key.encrypt(128);
-        context.server_key.unchecked_add_assign(&mut b1, &b2);
-
-        let sum_raw = client_key.decrypt_message_and_carry(&b1);
-        println!("sumraw {}", sum_raw);
-        let sum = client_key.decrypt(&b1);
-        println!("sum {}", sum);
-
-        let lut = context.server_key.generate_lookup_table(|a| a & 1);
-    }
-
-    #[test]
-    fn test_shortint_noise_scalar() {
-        const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
-            lwe_dimension: LweDimension(1091),
-            glwe_dimension: GlweDimension(1),
-            polynomial_size: PolynomialSize(32768),
-            lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-                3.038278019865525e-08,
-            )),
-            glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-                2.168404344971009e-19,
-            )),
-            pbs_base_log: DecompositionBaseLog(11),
-            pbs_level: DecompositionLevelCount(3),
-            ks_base_log: DecompositionBaseLog(3),
-            ks_level: DecompositionLevelCount(8),
-            message_modulus: MessageModulus(256),
-            carry_modulus: CarryModulus(1),
-            max_noise_level: MaxNoiseLevel::new(500),
-            log2_p_fail: -64.074,
-            ciphertext_modulus: CiphertextModulus::new_native(),
-            encryption_key_choice: EncryptionKeyChoice::Big,
-        };
+        let cte1 = client_key.encrypt_without_padding(0b0110100);
 
         let start = Instant::now();
-        let (client_key, context) = keys_with_params(PARAMS);
-        println!("keys generated: {:?}", start.elapsed());
+        let delta = (1u64 << (64 - 8));
+        let delta_log = DeltaLog(delta.ilog2() as usize);
+        let bit_cts = context
+            .wopbs_key
+            .extract_bits(delta_log, &cte1, ExtractedBitsCount(8));
+        println!("bootstrap elapsed: {:?}", start.elapsed());
 
-        let start = Instant::now();
-
-        for i in 0..1000000 {
-            let scalar = 85;
-            let mut b1 = client_key.encrypt(3);
-            context
-                .server_key
-                .unchecked_scalar_mul_assign(&mut b1, scalar);
-            let decrypted = client_key.decrypt(&b1);
-            assert_eq!(decrypted, (scalar * 3) as u64);
-            println!("check {}", i);
-        }
-    }
-
-    #[test]
-    fn test_shortint_noise_sum() {
-        const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
-            lwe_dimension: LweDimension(1091),
-            glwe_dimension: GlweDimension(1),
-            polynomial_size: PolynomialSize(32768),
-            lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-                3.038278019865525e-08,
-            )),
-            glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-                2.168404344971009e-19,
-            )),
-            pbs_base_log: DecompositionBaseLog(11),
-            pbs_level: DecompositionLevelCount(3),
-            ks_base_log: DecompositionBaseLog(3),
-            ks_level: DecompositionLevelCount(8),
-            message_modulus: MessageModulus(256),
-            carry_modulus: CarryModulus(1),
-            max_noise_level: MaxNoiseLevel::new(500),
-            log2_p_fail: -64.074,
-            ciphertext_modulus: CiphertextModulus::new_native(),
-            encryption_key_choice: EncryptionKeyChoice::Big,
-        };
-
-        let start = Instant::now();
-        let (client_key, context) = keys_with_params(PARAMS);
-        println!("keys generated: {:?}", start.elapsed());
-
-        let start = Instant::now();
-
-        for i in 0..1000000 {
-            let mut b1 = client_key.encrypt(3);
-            let b2 = client_key.encrypt(1);
-            for _ in 0..250 {
-                context.server_key.unchecked_add_assign(&mut b1, &b2);
-            }
-
-            let decrypted = client_key.decrypt(&b1);
-            assert_eq!(decrypted, 253);
-            println!("check {}", i);
+        // let lwe_decryption_key = client_key.glwe_secret_key.as_lwe_secret_key();
+        let lwe_decryption_key = &client_key.lwe_secret_key;
+        for (i, bit_ct) in bit_cts.iter().enumerate() {
+            let decrypted = lwe_encryption::decrypt_lwe_ciphertext(&lwe_decryption_key, &bit_ct);
+            let decoded = decrypted.0 >> (64 - 8);
+            println!("bit {}: {:b}", i, decoded);
         }
     }
 }
+
+// todo allan use borrowed types for list ciphertexts?
+// todo allan test non-trivial lut

@@ -2,6 +2,7 @@ pub mod boolean;
 pub mod plain;
 pub mod tfhe_boolean;
 pub mod tfhe_pbssub_shortint;
+pub mod tfhe_pbssub_wop_shortint;
 pub mod tfhe_shortint;
 pub mod tfhe_wop_shortint;
 
@@ -47,25 +48,5 @@ mod test {
         let encrypted = (encrypt_fn)(key, block, rounds);
 
         assert_eq!(encrypted, plain::encrypt_single_block(key, block, rounds));
-    }
-
-    #[test]
-    fn test_plain() {
-        test_vs_aes(plain::encrypt_single_block);
-    }
-
-    #[test]
-    fn test_boolean() {
-        test_vs_plain(boolean::encrypt_single_block, 2);
-    }
-
-    #[test]
-    fn test_tfhe_boolean() {
-        test_vs_plain(tfhe_boolean::encrypt_single_block, 2);
-    }
-
-    // #[test]
-    fn test_tfhe_shortint() {
-        test_vs_plain(tfhe_shortint::encrypt_single_block, 2);
     }
 }

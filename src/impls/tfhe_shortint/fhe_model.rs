@@ -507,4 +507,30 @@ mod test {
         context.server_key.message_extract_assign(&mut b1);
         println!("bootstrap elapsed: {:?}", start.elapsed());
     }
+
+    #[test]
+    fn test_shortint_bootstrap_negacyclic() {
+        let start = Instant::now();
+        let (client_key, context) = keys();
+        println!("keys generated: {:?}", start.elapsed());
+
+        let start = Instant::now();
+        let mut b1 = client_key.encrypt(1);
+        let b2 = client_key.encrypt(1);
+        context.server_key.unchecked_add_assign(&mut b1, &b2);
+        context.server_key.unchecked_add_assign(&mut b1, &b2);
+        // context.server_key.unchecked_add_assign(&mut b1, &b2);
+        // context.server_key.unchecked_add_assign(&mut b1, &b2);
+
+        println!("sumraw {}", client_key.decrypt_message_and_carry(&b1));
+        println!("sum {}", client_key.decrypt(&b1));
+
+        let lut = context.server_key.generate_lookup_table(|a| a & 1);
+        let normalized = context.server_key.apply_lookup_table(&b1, &lut);
+        println!(
+            "normalizedraw {}",
+            client_key.decrypt_message_and_carry(&normalized)
+        );
+        println!("normalized {}", client_key.decrypt(&normalized));
+    }
 }
