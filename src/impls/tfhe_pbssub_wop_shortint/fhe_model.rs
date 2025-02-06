@@ -5,6 +5,7 @@ use rayon::iter::{IntoParallelRefIterator, ParallelBridge};
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::ops::{BitAnd, BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
+use std::time::Instant;
 use tfhe::core_crypto::algorithms::{lwe_encryption, lwe_linear_algebra};
 use tfhe::core_crypto::entities::{LweCiphertextCreationMetadata, LweCiphertextOwned};
 use tfhe::core_crypto::prelude::{
@@ -109,9 +110,13 @@ impl BoolByteFhe {
         let bool_fhe_array = bit_cts
             .iter()
             .map(|bit_ct| {
+                let start = Instant::now();
+                let data = bit_ct.into_container().to_vec();
+                println!("copy bit data {:?}", start.elapsed());
+
                 BoolFhe::new(
                     LweCiphertextOwned::create_from(
-                        bit_ct.into_container().to_vec(),
+                        data,
                         LweCiphertextCreationMetadata {
                             ciphertext_modulus: CiphertextModulus::new_native(),
                         },
@@ -200,9 +205,11 @@ impl IntByteFhe {
         let lwe_size = bool_byte.bits().next().unwrap().ct.lwe_size();
 
         let bit_cts = bool_byte.bits().map(|bit| bit.ct.as_view());
+        let start = Instant::now();
         let bits_data: Vec<u64> = bit_cts
             .flat_map(|bit_ct| bit_ct.into_container().iter().copied())
             .collect();
+        println!("copy bits data {:?}", start.elapsed());
 
         let bits_list_ct = LweCiphertextListOwned::create_from(
             bits_data,

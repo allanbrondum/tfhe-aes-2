@@ -50,22 +50,30 @@ static RC: [u8; 11] = [
 
 static SBOX_LUT: OnceLock<ShortintWopbsLUT> = OnceLock::new();
 
-fn substitute(byte: &BoolByteFhe) -> BoolByteFhe {
+fn substitute_part1(byte: &BoolByteFhe) -> IntByteFhe {
     let context = &byte.bits().next().unwrap().context;
 
-    let start = Instant::now();
     let lut = SBOX_LUT.get_or_init(|| {
         IntByteFhe::generate_lookup_table(context, |byte| SBOX[byte as usize].into())
     });
-    println!("lut table {:?}", start.elapsed());
     let start = Instant::now();
     let int_byte = IntByteFhe::bootstrap_from_bool_byte(&byte, &lut);
     println!("boot int {:?}", start.elapsed());
+
+    int_byte
+}
+
+fn substitute_part2(byte: IntByteFhe) -> BoolByteFhe {
     let start = Instant::now();
-    let bool_byte = BoolByteFhe::bootstrap_from_int_byte(&int_byte);
+    let bool_byte = BoolByteFhe::bootstrap_from_int_byte(&byte);
     println!("boot bools {:?}", start.elapsed());
 
     bool_byte
+}
+
+fn substitute(byte: &BoolByteFhe) -> BoolByteFhe {
+    let int_byte = substitute_part1(byte);
+    substitute_part2(int_byte)
 }
 
 fn substitute_plain(byte: BoolByte) -> BoolByte {
@@ -79,9 +87,13 @@ fn xor_state(state: &mut StateFhe, key: &[WordFhe; 4]) {
 }
 
 fn sub_bytes(state: &mut StateFhe) {
-    state.bytes_mut().par_bridge().for_each(|byte| {
-        *byte = substitute(byte);
-    })
+    state
+        .bytes_mut()
+        .par_bridge()
+        .map(|state_byte| (substitute_part1(state_byte), state_byte))
+        .for_each(|( byte, state_byte)| {
+            *state_byte = substitute_part2(byte);
+        })
 }
 
 fn shift_rows(state: &mut StateFhe) {
@@ -399,11 +411,15 @@ mod test {
 
     #[test]
     fn test_tfhe_pbssub_wop_shortint_two_rounds() {
+        rayon::ThreadPoolBuilder::new().num_threads(16).build_global().unwrap();
+
         impls::test::test_vs_plain(tfhe_pbssub_wop_shortint::encrypt_single_block, 2);
     }
 
     #[test]
     fn test_tfhe_pbssub_wop_shortint_all_rounds() {
+        rayon::ThreadPoolBuilder::new().num_threads(16).build_global().unwrap();
+
         impls::test::test_vs_plain(tfhe_pbssub_wop_shortint::encrypt_single_block, ROUNDS);
     }
 }
