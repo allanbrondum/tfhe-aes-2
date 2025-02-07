@@ -332,6 +332,21 @@ fn sub_word_plain(mut word: Word) -> Word {
 static BOOL_FHE_DEFAULT: OnceLock<BoolFhe> = OnceLock::new();
 static INT_BYTE_FHE_DEFAULT: OnceLock<IntByteFhe> = OnceLock::new();
 
+/// Parameters created from
+///
+/// ```text
+/// ./optimizer  --min-precision 8 --max-precision 8 --p-error 5.42101086e-20 --ciphertext-modulus-log 64 --wop-pbs
+/// security level: 128
+/// target p_error: 5.4e-20
+/// per precision and log norm2:
+///
+///   - 8: # bits
+///     -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b, cb_l,cb_b, pp_l,pp_b,  cost, p_error
+///     ...
+///     - 7 :   2, 10,  785,    6,  7,     8,  2,     4,  6,     3, 12,  12143, 5.4e-20
+///     ...
+/// ```
+
 fn params() -> ShortintParameterSet {
     let wopbs_params = WopbsParameters {
         lwe_dimension: LweDimension(785),
