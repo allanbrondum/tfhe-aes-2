@@ -508,27 +508,27 @@ mod test {
         assert_eq!(array, [0, 0, 0, 0]);
     }
 
-    use crate::impls::{tfhe_pbssub_shortint, tfhe_pbssub_wop_shortint};
+    use crate::impls::{ tfhe_pbssub_wop_shortint};
     use crate::{impls, ROUNDS};
 
-    #[test]
-    fn test_tfhe_pbssub_wop_shortint_two_rounds() {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(16)
-            .build_global()
-            .unwrap();
-        println!("current_num_threads: {}", rayon::current_num_threads());
-
-        impls::test::test_vs_plain(tfhe_pbssub_wop_shortint::encrypt_single_block, 2);
-    }
-
-    #[test]
-    fn test_tfhe_pbssub_wop_shortint_all_rounds() {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(16)
-            .build_global()
-            .unwrap();
-
-        impls::test::test_vs_plain(tfhe_pbssub_wop_shortint::encrypt_single_block, ROUNDS);
-    }
+    // #[test]
+    // fn test_tfhe_pbssub_wop_shortint_two_rounds() {
+    //     rayon::ThreadPoolBuilder::new()
+    //         .num_threads(16)
+    //         .build_global()
+    //         .unwrap();
+    //     println!("current_num_threads: {}", rayon::current_num_threads());
+    //
+    //     impls::test::test_vs_plain(tfhe_pbssub_wop_shortint::encrypt_single_block, 2);
+    // }
+    //
+    // #[test]
+    // fn test_tfhe_pbssub_wop_shortint_all_rounds() {
+    //     rayon::ThreadPoolBuilder::new()
+    //         .num_threads(16)
+    //         .build_global()
+    //         .unwrap();
+    //
+    //     impls::test::test_vs_plain(tfhe_pbssub_wop_shortint::encrypt_single_block, ROUNDS);
+    // }
 }

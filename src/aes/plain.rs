@@ -1,7 +1,7 @@
-mod model;
+mod data_model;
 
-use crate::impls::plain::model::{State, Word};
-use crate::{Block, Key};
+use crate::aes::plain::data_model::{State, Word};
+use crate::aes::{Block, Key};
 use std::ops::{BitXor, BitXorAssign, Index, IndexMut};
 
 static SBOX: [u8; 256] = [
@@ -89,7 +89,8 @@ fn mix_columns(state: &mut State) {
     }
 }
 
-pub fn encrypt_block(expanded_key: &[Word; 44], mut block: Block, rounds: usize) -> Block {
+/// Encrypts a single block using an already expanded key
+pub fn encrypt_block(expanded_key: &[Word; 44], block: Block, rounds: usize) -> Block {
     let mut state = State::from_array(&block);
 
     xor_state(
@@ -119,6 +120,7 @@ pub fn encrypt_block(expanded_key: &[Word; 44], mut block: Block, rounds: usize)
     state.to_array()
 }
 
+/// Create key schedule
 pub fn key_schedule(key_slice: &Key) -> [Word; 44] {
     let mut key: [Word; 4] = Default::default();
     let mut expanded_key: [Word; 44] = [Word::zero(); 44];
@@ -156,18 +158,21 @@ fn sub_word(mut word: Word) -> Word {
     word
 }
 
-pub fn encrypt_single_block(key: Key, block: Block, rounds: usize) -> Block {
+pub fn expand_key_and_encrypt_blocks(key: Key, blocks: &[Block], rounds: usize) -> Vec<Block> {
     let key_schedule = key_schedule(&key);
-    encrypt_block(&key_schedule, block, rounds)
+    blocks
+        .iter()
+        .map(|block| encrypt_block(&key_schedule, *block, rounds))
+        .collect()
 }
 
 #[cfg(test)]
 mod test {
-    use crate::impls;
-    use crate::impls::{boolean, plain, tfhe_boolean, tfhe_shortint};
+    use super::*;
+    use crate::aes::test_helper;
 
     #[test]
     fn test_plain() {
-        impls::test::test_vs_aes(plain::encrypt_single_block);
+        test_helper::test_vs_aes(expand_key_and_encrypt_blocks);
     }
 }

@@ -190,13 +190,13 @@ impl FheContext {
             lwe_keyswitch::keyswitch_lwe_ciphertext(
                 &self.server_key.key_switching_key,
                 &ciphertext_buffers.buffer_lwe_after_pbs.as_view(),
-                &mut ct.ct,
+                &mut ct.ct.ct,
             );
         });
 
         println!("bootstrap {:?}", start.elapsed());
 
-        ct.set_noise_level(NoiseLevel::NOMINAL, self.server_key.max_noise_level);
+        ct.ct.set_noise_level(NoiseLevel::NOMINAL, self.server_key.max_noise_level);
     }
 }
 
