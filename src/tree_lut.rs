@@ -1,6 +1,7 @@
-use rayon::iter::ParallelIterator;
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::iter::{IntoParallelRefIterator, ParallelBridge};
 use std::fmt::Debug;
+use std::iter;
 use std::ops::{BitAnd, BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
 use std::sync::Arc;
 use tfhe::core_crypto::algorithms::{
@@ -88,15 +89,31 @@ impl Shortint1BitFheContext {
 
     pub fn test_vector_from_ciphertexts(
         &self,
+        ct0: &shortint::Ciphertext,
         ct1: &shortint::Ciphertext,
-        ct2: &shortint::Ciphertext,
     ) -> TestVector {
-        todo!()
-        // test_vector_from_ciphertexts(
-        //     self.server_key.bootstrapping_key.polynomial_size(),
-        //     self.server_key.bootstrapping_key.glwe_size(),
-        //     ct1, ct2,
-        // )
+        TestVector(test_vector_from_ciphertexts(
+            &self.packing_keyswitch_key.as_view(),
+            self.server_key.bootstrapping_key.polynomial_size(),
+            &ct0.ct,
+            &ct1.ct,
+        ))
+    }
+
+    pub fn packing_keyswitch(&self, cts: &[&shortint::Ciphertext]) -> GlweCiphertextOwned<u64> {
+        let in_data: Vec<u64> = cts
+            .iter()
+            .flat_map(|ct| ct.ct.as_ref().iter().copied())
+            .collect();
+
+        let ins = LweCiphertextListOwned::from_container(
+            in_data,
+            self.packing_keyswitch_key
+                .input_key_lwe_dimension()
+                .to_lwe_size(),
+            CiphertextModulus::new_native(),
+        );
+        keyswitch_and_pack_ciphertext_list(&self.packing_keyswitch_key.as_view(), &ins.as_view())
     }
 
     pub fn bootstrap(
@@ -129,37 +146,6 @@ impl Shortint1BitFheContext {
         });
 
         ct.set_noise_level(NoiseLevel::NOMINAL, self.server_key.max_noise_level);
-    }
-
-    pub fn packing_key_switch(&self, cts: &[&shortint::Ciphertext]) -> GlweCiphertextOwned<u64> {
-        let out = ShortintEngine::with_thread_local_mut(|engine| {
-            let in_data: Vec<u64> = cts
-                .iter()
-                .flat_map(|ct| ct.ct.as_ref().iter().copied())
-                .collect();
-
-            let ins = LweCiphertextListOwned::from_container(
-                in_data,
-                self.packing_keyswitch_key
-                    .input_key_lwe_dimension()
-                    .to_lwe_size(),
-                CiphertextModulus::new_native(),
-            );
-            let mut out = GlweCiphertextOwned::new(
-                0,
-                self.packing_keyswitch_key.output_glwe_size(),
-                self.packing_keyswitch_key.output_polynomial_size(),
-                CiphertextModulus::new_native(),
-            );
-            lwe_packing_keyswitch::keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
-                &self.packing_keyswitch_key,
-                &ins,
-                &mut out,
-            );
-            out
-        });
-
-        out
     }
 
     // pub fn packing_key_switch_single(&self, ct: &shortint::Ciphertext) -> GlweCiphertextOwned<u64> {
@@ -239,16 +225,14 @@ fn apply_blind_rotate(
 }
 
 fn encode(clear: Cleartext<u64>) -> Plaintext<u64> {
+    // 0/1 bit is represented at next highest bit
     Plaintext(clear.0 << 62)
 }
 
-// fn decode(plain: Plaintext<u64>) -> Cleartext<u64> {
-//     Cleartext((plain.0 >> 62) & 1)
-// }
-
 fn decode(plain: Plaintext<u64>) -> Cleartext<u64> {
     let decomposer = SignedDecomposer::new(DecompositionBaseLog(2), DecompositionLevelCount(1));
-    Cleartext(decomposer.closest_representable(plain.0) >> 62)
+    // 0/1 bit is represented at next highest bit
+    Cleartext((decomposer.closest_representable(plain.0) >> 62) & 1)
 }
 
 fn test_vector_from_cleartext_fn(
@@ -263,81 +247,99 @@ fn test_vector_from_cleartext_fn(
         CiphertextModulus::new_native(),
     );
 
-    // Modulus of the msg contained in the msg bits and operations buffer
-    let input_modulus_sup = 2;
-
-    // N/(p/2) = size of each block
-    let box_size = polynomial_size.0 / input_modulus_sup;
-
     let mut acc_body = acc.get_mut_body();
     let mut body_slice = acc_body.as_mut();
 
-    // Tracking the max value of the function to define the degree later
-
-    for i in 0..input_modulus_sup {
-        let index = i * box_size;
-        let f_eval = f(i as u64);
-        body_slice[index..index + box_size].fill(encode(Cleartext(f_eval)).0);
-    }
-
-    let half_box_size = box_size / 2;
-
-    // Negate the first half_box_size coefficients
-    // for a_i in body_slice[0..half_box_size].iter_mut() {
-    //     *a_i = (*a_i).wrapping_neg();
-    // }
-
-    // for a_i in body_slice.iter_mut() {
-    //     *a_i = (*a_i).wrapping_neg() + encode(Cleartext(1)).0;
-    // }
+    // Fill accumulator with f evaluated at 0 and 1
+    let box_size = polynomial_size.0 / 2;
+    body_slice[0..box_size].fill(encode(Cleartext(f(0))).0);
+    body_slice[box_size..2 * box_size].fill(encode(Cleartext(f(1))).0);
 
     // Rotate the accumulator
+    let half_box_size = box_size / 2;
     body_slice.rotate_left(half_box_size);
 
     acc
 }
 
-// fn test_vector_from_ciphertexts(
-//     polynomial_size: PolynomialSize,
-//     glwe_size: GlweSize,
-//     ct1: &shortint::Ciphertext, ct2: &shortint::Ciphertext
-// ) -> GlweCiphertextOwned<u64> {
-//     let mut acc = GlweCiphertext::new(
-//         0,
-//         glwe_size,
-//         polynomial_size,
-//         CiphertextModulus::new_native(),
-//     );
-//
-//     // Modulus of the msg contained in the msg bits and operations buffer
-//     let input_modulus_sup = 2;
-//
-//     // N/(p/2) = size of each block
-//     let box_size = polynomial_size.0 / input_modulus_sup;
-//
-//     let mut acc_body = acc.get_mut_body();
-//     let mut body_slice = acc_body.as_mut();
-//
-//     // Tracking the max value of the function to define the degree later
-//
-//     for i in 0..input_modulus_sup {
-//         let index = i * box_size;
-//         let f_eval = f(i as u64);
-//         body_slice[index..index + box_size].fill(encode(Cleartext(f_eval)).0);
-//     }
-//
-//     let half_box_size = box_size / 2;
-//
-//     // Negate the first half_box_size coefficients
-//     for a_i in body_slice[0..half_box_size].iter_mut() {
-//         *a_i = (*a_i).wrapping_neg();
-//     }
-//
-//     // Rotate the accumulator
-//     body_slice.rotate_left(half_box_size);
-//
-//     acc
-// }
+fn test_vector_from_ciphertexts(
+    packing_keyswitch_key: &LwePackingKeyswitchKeyView<u64>,
+    polynomial_size: PolynomialSize,
+    ct0: &LweCiphertextOwned<u64>,
+    ct1: &LweCiphertextOwned<u64>,
+) -> GlweCiphertextOwned<u64> {
+    // Create ciphertext list to be transformed to test vector
+    let box_size = polynomial_size.0 / 2;
+    let half_box_size = box_size / 2;
+    // todo reuse buffers
+    let list_data: Vec<u64> = iter::repeat(ct0)
+        .take(half_box_size)
+        .chain(iter::repeat(ct1).take(box_size))
+        .chain(iter::repeat(ct0).take(box_size - half_box_size))
+        .flat_map(|ct| ct.as_ref())
+        .copied()
+        .collect();
+    let mut ciphertext_list = LweCiphertextListOwned::from_container(
+        list_data,
+        packing_keyswitch_key
+            .input_key_lwe_dimension()
+            .to_lwe_size(),
+        CiphertextModulus::new_native(),
+    );
+
+    keyswitch_and_pack_ciphertext_list(packing_keyswitch_key, &ciphertext_list.as_view())
+}
+
+fn keyswitch_and_pack_ciphertext_list(
+    packing_keyswitch_key: &LwePackingKeyswitchKeyView<u64>,
+    ciphertext_list: &LweCiphertextListView<u64>,
+) -> GlweCiphertextOwned<u64> {
+    let mut out = GlweCiphertextOwned::new(
+        0,
+        packing_keyswitch_key.output_glwe_size(),
+        packing_keyswitch_key.output_polynomial_size(),
+        CiphertextModulus::new_native(),
+    );
+    lwe_packing_keyswitch::keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+        &packing_keyswitch_key,
+        &ciphertext_list,
+        &mut out,
+    );
+    out
+}
+
+pub fn apply_2bit_multivariate_function(
+    ct0: &shortint::Ciphertext,
+    ct1: &shortint::Ciphertext,
+    f: impl Fn(u8) -> Cleartext<u64>,
+) {
+    for m0 in 0..1 {
+        for m1 in 0..1 {}
+    }
+}
+
+fn apply_selectors_rec<'a>(
+    context: &Shortint1BitFheContext,
+    selectors: &[shortint::Ciphertext],
+    test_vectors: &'a [TestVector],
+) -> shortint::Ciphertext {
+    let (selector, selectors_rec) = selectors.split_first().expect("at least one selector");
+
+    if selectors_rec.is_empty() {
+        assert_eq!(test_vectors.len(), 1);
+        context.bootstrap(selector, &test_vectors[0])
+    } else {
+        assert!(!test_vectors.is_empty());
+        assert_eq!(test_vectors.len() % 2, 0);
+        let test_vectors_rec: Vec<_> = test_vectors
+            .par_iter()
+            .map(|tv| context.bootstrap(selector, tv))
+            .chunks(2)
+            .map(|tv| context.test_vector_from_ciphertexts(&tv[0], &tv[1]))
+            .collect();
+        apply_selectors_rec(context, selectors_rec, &test_vectors_rec)
+    }
+}
 
 #[cfg(test)]
 mod test {
@@ -347,7 +349,7 @@ mod test {
     use tfhe::shortint::{CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus};
 
     #[test]
-    fn test_packing_key_switch() {
+    fn test_packing_keyswitch() {
         let (client_key, context) = Shortint1BitFheContext::generate_keys();
 
         let ct0_clear = 0;
@@ -355,7 +357,7 @@ mod test {
         let ct0 = client_key.encrypt(ct0_clear);
         let ct1 = client_key.encrypt(ct1_clear);
 
-        let packed = context.packing_key_switch(&[&ct0, &ct1]);
+        let packed = context.packing_keyswitch(&[&ct0, &ct1]);
         let mut packed_plain = PlaintextList::new(0, PlaintextCount(packed.polynomial_size().0));
         glwe_encryption::decrypt_glwe_ciphertext(
             &client_key.glwe_secret_key,
@@ -363,16 +365,37 @@ mod test {
             &mut packed_plain,
         );
 
-        assert_eq!(decode(Plaintext(packed_plain.as_ref()[0])), Cleartext(0), "plain: {:064b}", packed_plain.as_ref()[0]);
-        assert_eq!(decode(Plaintext(packed_plain.as_ref()[1])), Cleartext(1), "plain: {:064b}", packed_plain.as_ref()[1]);
-        assert_eq!(decode(Plaintext(packed_plain.as_ref()[2])), Cleartext(0), "plain: {:064b}", packed_plain.as_ref()[1]);
-        assert_eq!(decode(Plaintext(packed_plain.as_ref()[3])), Cleartext(0), "plain: {:064b}", packed_plain.as_ref()[1]);
-        assert_eq!(decode(Plaintext(packed_plain.as_ref()[4])), Cleartext(0), "plain: {:064b}", packed_plain.as_ref()[1]);
-
+        assert_eq!(
+            decode(Plaintext(packed_plain.as_ref()[0])),
+            Cleartext(0),
+            "plain: {:064b}",
+            packed_plain.as_ref()[0]
+        );
+        assert_eq!(
+            decode(Plaintext(packed_plain.as_ref()[1])),
+            Cleartext(1),
+            "plain: {:064b}",
+            packed_plain.as_ref()[1]
+        );
+        assert_eq!(
+            decode(Plaintext(packed_plain.as_ref()[2])),
+            Cleartext(0),
+            "plain: {:064b}",
+            packed_plain.as_ref()[1]
+        );
+        assert_eq!(
+            decode(Plaintext(packed_plain.as_ref()[3])),
+            Cleartext(0),
+            "plain: {:064b}",
+            packed_plain.as_ref()[1]
+        );
+        assert_eq!(
+            decode(Plaintext(packed_plain.as_ref()[4])),
+            Cleartext(0),
+            "plain: {:064b}",
+            packed_plain.as_ref()[1]
+        );
     }
-
-
-
 
     #[test]
     fn test_tree_lut_2() {
@@ -396,5 +419,9 @@ mod test {
 
         assert_eq!(client_key.decrypt(&d_0), f(m0_clear, 0));
         assert_eq!(client_key.decrypt(&d_1), f(m0_clear, 1));
+
+        let tv = context.test_vector_from_ciphertexts(&d_0, &d_1);
+        let d = context.bootstrap(&m1, &tv);
+        assert_eq!(client_key.decrypt(&d), f(m0_clear, m1_clear));
     }
 }
