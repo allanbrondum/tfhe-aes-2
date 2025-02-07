@@ -192,7 +192,7 @@ impl BoolByteFhe {
             .map(|bit_ct| {
                 let start = Instant::now();
                 let data = bit_ct.into_container().to_vec();
-                println!("copy bit data {:?}", start.elapsed());
+                // println!("copy bit data {:?}", start.elapsed());
 
                 BoolFhe::new(
                     LweCiphertextOwned::create_from(
@@ -289,7 +289,7 @@ impl IntByteFhe {
         let bits_data: Vec<u64> = bit_cts
             .flat_map(|bit_ct| bit_ct.into_container().iter().copied())
             .collect();
-        println!("copy bits data {:?}", start.elapsed());
+        // println!("copy bits data {:?}", start.elapsed());
 
         let bits_list_ct = LweCiphertextListOwned::create_from(
             bits_data,
