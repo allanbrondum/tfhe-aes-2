@@ -196,7 +196,8 @@ impl FheContext {
 
         println!("bootstrap {:?}", start.elapsed());
 
-        ct.ct.set_noise_level(NoiseLevel::NOMINAL, self.server_key.max_noise_level);
+        ct.ct
+            .set_noise_level(NoiseLevel::NOMINAL, self.server_key.max_noise_level);
     }
 }
 
