@@ -480,6 +480,7 @@ mod test {
     fn test_bool_fhe() {
         let (client_key, context) = keys();
 
+
         let mut b1 = fhe_encrypt_bool(&client_key, &context, false);
         let b2 = fhe_encrypt_bool(&client_key, &context, true);
 

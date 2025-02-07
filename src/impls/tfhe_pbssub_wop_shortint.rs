@@ -334,7 +334,7 @@ static INT_BYTE_FHE_DEFAULT: OnceLock<IntByteFhe> = OnceLock::new();
 
 fn params() -> ShortintParameterSet {
     let wopbs_params = WopbsParameters {
-        lwe_dimension: LweDimension(750),
+        lwe_dimension: LweDimension(785),
         glwe_dimension: GlweDimension(2),
         polynomial_size: PolynomialSize(1024),
         lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
@@ -343,17 +343,17 @@ fn params() -> ShortintParameterSet {
         glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
             0.00000000000000022148688116005568513645324585951,
         )),
-        pbs_base_log: DecompositionBaseLog(5),
-        pbs_level: DecompositionLevelCount(8),
-        ks_level: DecompositionLevelCount(15),
-        ks_base_log: DecompositionBaseLog(1),
-        pfks_level: DecompositionLevelCount(4),
-        pfks_base_log: DecompositionBaseLog(10),
+        pbs_base_log: DecompositionBaseLog(7),
+        pbs_level: DecompositionLevelCount(6),
+        ks_level: DecompositionLevelCount(8),
+        ks_base_log: DecompositionBaseLog(2),
+        pfks_level: DecompositionLevelCount(3),
+        pfks_base_log: DecompositionBaseLog(12),
         pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
             0.00000000000000022148688116005568513645324585951,
         )),
-        cbs_level: DecompositionLevelCount(7),
-        cbs_base_log: DecompositionBaseLog(4),
+        cbs_level: DecompositionLevelCount(4),
+        cbs_base_log: DecompositionBaseLog(6),
         message_modulus: MessageModulus(256),
         carry_modulus: CarryModulus(1),
         ciphertext_modulus: CiphertextModulus::new_native(),
@@ -372,7 +372,7 @@ fn params() -> ShortintParameterSet {
         ks_level: wopbs_params.ks_level,
         message_modulus: wopbs_params.message_modulus,
         carry_modulus: wopbs_params.carry_modulus,
-        max_noise_level: MaxNoiseLevel::new(10),
+        max_noise_level: MaxNoiseLevel::new(11),
         log2_p_fail: -64.074,
         ciphertext_modulus: wopbs_params.ciphertext_modulus,
         encryption_key_choice: wopbs_params.encryption_key_choice,
