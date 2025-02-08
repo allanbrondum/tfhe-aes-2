@@ -96,7 +96,7 @@ fn params() -> ShortintParameterSet {
 pub struct BitCt {
     ct: LweCiphertextOwned<u64>,
     noise_level: NoiseLevel,
-    context: FheContext,
+    pub context: FheContext,
 }
 
 impl Debug for BitCt {
@@ -200,19 +200,20 @@ impl BitT for BitCt {
     }
 }
 
+/// Byte represented as 8 bits in an integer
 #[derive(Clone)]
-pub struct IntByteFhe {
+pub struct IntByte {
     pub ct: shortint::ciphertext::Ciphertext,
     pub context: FheContext,
 }
 
-impl IntByteFhe {
+impl IntByte {
     pub fn new(fhe: shortint::ciphertext::Ciphertext, context: FheContext) -> Self {
         Self { ct: fhe, context }
     }
 }
 
-impl IntByteFhe {
+impl IntByte {
     // todo is this a bootstrap? does it reset noise?
     pub fn bootstrap_from_bits(byte: &Byte<BitCt>, lut: &ShortintWopbsLUT) -> Self {
         assert_eq!(lut.as_ref().output_ciphertext_count(), CiphertextCount(1));
@@ -270,7 +271,7 @@ impl IntByteFhe {
 }
 
 impl Byte<BitCt> {
-    pub fn extract_bits_from_int_byte(int_byte: &IntByteFhe) -> Self {
+    pub fn extract_bits_from_int_byte(int_byte: &IntByte) -> Self {
         let context = &int_byte.context;
 
         let bit_cts =
@@ -431,8 +432,8 @@ mod test {
         let byte = 0b10110101;
         let byte_fhe = fhe_encrypt_byte(&client_key, byte);
 
-        let lut = IntByteFhe::generate_lookup_table(&context, |val| val);
-        let int_byte_fhe = IntByteFhe::bootstrap_from_bits(&byte_fhe, &lut);
+        let lut = IntByte::generate_lookup_table(&context, |val| val);
+        let int_byte_fhe = IntByte::bootstrap_from_bits(&byte_fhe, &lut);
 
         let decrypted = client_key.0.decrypt_without_padding(&int_byte_fhe.ct);
         assert_eq!(decrypted, 0b10110101);
@@ -450,8 +451,8 @@ mod test {
 
         let byte_fhe = byte_fhe ^ byte_fhe2.clone();
 
-        let lut = IntByteFhe::generate_lookup_table(&context, |val| val);
-        let int_byte_fhe = IntByteFhe::bootstrap_from_bits(&byte_fhe, &lut);
+        let lut = IntByte::generate_lookup_table(&context, |val| val);
+        let int_byte_fhe = IntByte::bootstrap_from_bits(&byte_fhe, &lut);
 
         let decrypted_int_byte = client_key.0.decrypt_without_padding(&int_byte_fhe.ct) as u8;
         let decrypted_bits_byte = fhe_decrypt_byte(&client_key, &byte_fhe);
@@ -465,8 +466,8 @@ mod test {
         let byte = 0b10110101;
         let byte_fhe = fhe_encrypt_byte(&client_key, byte);
 
-        let lut = IntByteFhe::generate_lookup_table(&context, |val| val + 3);
-        let int_byte_fhe = IntByteFhe::bootstrap_from_bits(&byte_fhe, &lut);
+        let lut = IntByte::generate_lookup_table(&context, |val| val + 3);
+        let int_byte_fhe = IntByte::bootstrap_from_bits(&byte_fhe, &lut);
 
         let decrypted = client_key.0.decrypt_without_padding(&int_byte_fhe.ct);
         assert_eq!(decrypted, 0b10110101 + 3);
@@ -476,7 +477,7 @@ mod test {
     fn test_extract_bits_from_int_byte() {
         let (client_key, context) = KEYS.clone();
 
-        let int_byte_fhe = IntByteFhe::new(client_key.0.encrypt_without_padding(0b10110101), context);
+        let int_byte_fhe = IntByte::new(client_key.0.encrypt_without_padding(0b10110101), context);
         let bool_byte_fhe = Byte::extract_bits_from_int_byte(&int_byte_fhe);
 
         let bool_byte = fhe_decrypt_byte(&client_key, &bool_byte_fhe);
@@ -538,5 +539,4 @@ mod test {
     //         debug!("bit {}: {:b}", i, decoded);
     //     }
     // }
-
 }

@@ -1,8 +1,8 @@
 /// Model and logic for AES-128 encryption executed in an FHE context
 pub mod fhe;
+pub mod fhe_impls;
 /// Plain AES-128 implementation used for testing reference (e.g. running less than 10 rounds)
 pub mod plain;
-pub  mod fhe_impls;
 #[cfg(test)]
 mod test_helper;
 

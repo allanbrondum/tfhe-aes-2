@@ -1,81 +1,90 @@
-// fn substitute_part1(byte: &BoolByteFhe) -> IntByteFhe {
-//     let context = &byte.bits().next().unwrap().context;
-//
-//     let lut = SBOX_LUT.get_or_init(|| {
-//         IntByteFhe::generate_lookup_table(context, |byte| SBOX[byte as usize].into())
-//     });
-//     let start = Instant::now();
-//     let int_byte = IntByteFhe::bootstrap_from_bool_byte(&byte, &lut);
-//     debug!("boot int {:?}", start.elapsed());
-//
-//     int_byte
-// }
-//
-// fn substitute_part2(byte: IntByteFhe) -> BoolByteFhe {
-//     let start = Instant::now();
-//     let bool_byte = BoolByteFhe::bootstrap_from_int_byte(&byte);
-//     debug!("boot bools {:?}", start.elapsed());
-//
-//     bool_byte
-// }
-
-// pub fn encrypt_single_block(key: Key, block: Block, rounds: usize) -> Block {
-//     debug!("start");
-//
-//
-//
-//     debug!("keys generated");
-//
-//     BOOL_FHE_DEFAULT
-//         .set(BoolFhe::trivial(false, context.clone()))
-//         .expect("only set once");
-//
-//     INT_BYTE_FHE_DEFAULT
-//         .set(IntByteFhe::new(
-//             context.server_key.create_trivial(0),
-//             context.clone(),
-//         ))
-//         .expect("only set once");
-//
-//     let key_fhe = fhe_model::fhe_encrypt_byte_array(&context.client_key, &context, &key);
-//     let block_fhe = fhe_model::fhe_encrypt_byte_array(&context.client_key, &context, &block);
-//
-//     debug!("aes key and block encrypted");
-//
-//     let start = Instant::now();
-//
-//     let key_schedule_fhe = key_schedule(&context, &key_fhe);
-//
-//     let key_schedule_plain = key_schedule_plain(&key);
-//     let key_schedule_decrypted = fhe_decrypt_word_array(&context.client_key, &key_schedule_fhe);
-//     if key_schedule_decrypted != key_schedule_plain {
-//         edebug!("wrong key schedule encryption");
-//         panic!();
-//     }
-//
-//     let key_schedule_fhe =
-//         fhe_encrypt_word_array(&context.client_key, &context, &key_schedule_plain);
-//
-//     debug!("key schedule created {:?}", start.elapsed());
-//
-//     let encrypted = encrypt_block(&context, &key_schedule_fhe, block_fhe, rounds);
-//
-//     debug!("block encrypted (rounds: {}) {:?}", rounds, start.elapsed());
-//
-//     fhe_model::fhe_decrypt_byte_array(&context.client_key, &encrypted)
-// }
-//
-//
-//
-//
-
-use crate::aes_128::fhe::data_model::{Byte, Word};
-use crate::aes_128::plain;
+use crate::aes_128::fhe::data_model::{Block, Byte, ByteT, Word};
+use crate::aes_128::{fhe, plain, Key, SBOX};
 use crate::tfhe::shortint_woppbs_8bit::*;
-use crate::util;
+use crate::{aes_128, util};
 use rayon::iter::ParallelIterator;
-use rayon::iter::IntoParallelRefIterator;
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator};
+use std::sync::OnceLock;
+use std::time::Instant;
 use tfhe::core_crypto::entities::Cleartext;
+use tfhe::shortint::wopbs::ShortintWopbsLUT;
+use tracing::debug;
+
+impl ByteT for Byte<BitCt> {
+    fn bootstrap(&self) -> Self {
+        let context = &self.bits().find_first(|_| true).unwrap().context;
+
+        static IDENTITY_LUT: OnceLock<ShortintWopbsLUT> = OnceLock::new();
+        let lut = IDENTITY_LUT.get_or_init(|| IntByte::generate_lookup_table(context, |byte| byte));
+
+        self.bootstrap_with_lut(lut)
+    }
+
+    fn aes_substitute(&self) -> Self {
+        let context = &self.bits().find_first(|_| true).unwrap().context;
+
+        static SBOX_LUT: OnceLock<ShortintWopbsLUT> = OnceLock::new();
+        let lut = SBOX_LUT.get_or_init(|| {
+            IntByte::generate_lookup_table(context, |byte| SBOX[byte as usize].into())
+        });
+
+        self.bootstrap_with_lut(lut)
+    }
+}
+
+impl Byte<BitCt> {
+    fn bootstrap_with_lut(&self, lut: &ShortintWopbsLUT) -> Self {
+        let start = Instant::now();
+        let int_byte = IntByte::bootstrap_from_bits(&self, &lut);
+        debug!("boot int {:?}", start.elapsed());
+
+        let start = Instant::now();
+        let byte = Byte::extract_bits_from_int_byte(&int_byte);
+        debug!("extract bits {:?}", start.elapsed());
+
+        byte
+    }
+}
+
+pub fn expand_key_and_encrypt_blocks(
+    key_clear: aes_128::Key,
+    blocks_clear: &[aes_128::Block],
+    rounds: usize,
+) -> Vec<aes_128::Block> {
+    debug!("start");
+
+    // Client side: generate keys
+    let (client_key, context) = FheContext::generate_keys();
+    debug!("keys generated");
+
+    // Client side: FHE encrypt AES key and block
+    let key = fhe_encrypt_byte_array(&client_key, &key_clear);
+    let blocks: Vec<_> = blocks_clear
+        .iter()
+        .map(|block| fhe_encrypt_byte_array(&client_key, &block))
+        .collect();
+    debug!("aes key and block encrypted");
+
+    // Server side (optional): AES encrypt blocks
+    let start = Instant::now();
+    let key_schedule = fhe::key_schedule(&key);
+    debug!("key schedule created {:?}", start.elapsed());
+
+    // Server side: AES encrypt blocks
+    let start = Instant::now();
+    let encrypted_blocks: Vec<_> = blocks
+        .into_par_iter()
+        .map(|block| fhe::encrypt_block(&key_schedule, block, rounds))
+        .collect();
+
+    debug!("block encrypted (rounds: {}) {:?}", rounds, start.elapsed());
+
+    // Client side (optional): FHE decrypt AES encrypted blocks
+    encrypted_blocks
+        .iter()
+        .map(|block| fhe_decrypt_byte_array(&client_key, block))
+        .collect()
+}
 
 pub fn fhe_encrypt_word_array<const N: usize>(
     client_key: &ClientKey,
@@ -131,34 +140,25 @@ pub fn fhe_decrypt_byte(client_key: &ClientKey, byte: &Byte<BitCt>) -> u8 {
     util::bits_to_byte(byte.bits().map(|bit| client_key.decrypt(bit).0 as u8))
 }
 
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::aes_128::{test_helper, ROUNDS};
+    use tracing::debug;
 
-//
-// todo allan use borrowed types for list ciphertexts?
-// todo allan test non-trivial lut
+    #[test]
+    fn test_tfhe_pbssub_wop_shortint_two_rounds() {
+        // rayon::ThreadPoolBuilder::new()
+        //     .num_threads(16)
+        //     .build_global()
+        //     .unwrap();
+        // debug!("current_num_threads: {}", rayon::current_num_threads());
 
+        test_helper::test_vs_plain(expand_key_and_encrypt_blocks, 2);
+    }
 
-
-//     use crate::impls::{ tfhe_pbssub_wop_shortint};
-//     use crate::{impls, ROUNDS};
-//
-//     // #[test]
-//     // fn test_tfhe_pbssub_wop_shortint_two_rounds() {
-//     //     rayon::ThreadPoolBuilder::new()
-//     //         .num_threads(16)
-//     //         .build_global()
-//     //         .unwrap();
-//     //     debug!("current_num_threads: {}", rayon::current_num_threads());
-//     //
-//     //     impls::test::test_vs_plain(tfhe_pbssub_wop_shortint::encrypt_single_block, 2);
-//     // }
-//     //
-//     // #[test]
-//     // fn test_tfhe_pbssub_wop_shortint_all_rounds() {
-//     //     rayon::ThreadPoolBuilder::new()
-//     //         .num_threads(16)
-//     //         .build_global()
-//     //         .unwrap();
-//     //
-//     //     impls::test::test_vs_plain(tfhe_pbssub_wop_shortint::encrypt_single_block, ROUNDS);
-//     // }
-// }
+    #[test]
+    fn test_tfhe_pbssub_wop_shortint_all_rounds() {
+        test_helper::test_vs_plain(expand_key_and_encrypt_blocks, ROUNDS);
+    }
+}

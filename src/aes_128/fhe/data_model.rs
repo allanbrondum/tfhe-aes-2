@@ -24,6 +24,7 @@ pub trait ByteT: Sized {
     fn aes_substitute(&self) -> Self;
 }
 
+/// Byte represented as individual bits
 #[derive(Debug, Clone, Default)]
 pub struct Byte<Bit>([Bit; 8]);
 

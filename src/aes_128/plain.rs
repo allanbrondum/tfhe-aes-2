@@ -1,9 +1,8 @@
 pub mod data_model;
 
-
-use std::ops::{BitXor, BitXorAssign, Index, IndexMut};
-use crate::aes_128::{Block, Key};
 use crate::aes_128::plain::data_model::{State, Word};
+use crate::aes_128::{Block, Key};
+use std::ops::{BitXor, BitXorAssign, Index, IndexMut};
 
 static SBOX: [u8; 256] = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -169,8 +168,8 @@ pub fn expand_key_and_encrypt_blocks(key: Key, blocks: &[Block], rounds: usize) 
 
 #[cfg(test)]
 mod test {
-    use crate::aes_128::test_helper;
     use super::*;
+    use crate::aes_128::test_helper;
 
     #[test]
     fn test_plain() {

@@ -1,6 +1,6 @@
+use rayon::iter::IndexedParallelIterator;
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
-use rayon::iter::IndexedParallelIterator;
 use std::fmt::Debug;
 use std::mem;
 
@@ -33,7 +33,9 @@ pub fn shl_array<const N: usize, T: Default>(array: &mut [T; N], shl: usize) {
 }
 
 pub fn byte_to_bits(byte: u8) -> impl ParallelIterator<Item = u8> {
-    (0..8).into_par_iter().map(move |i| if 0 == (byte & (0x80 >> i)) { 0 } else { 1 })
+    (0..8)
+        .into_par_iter()
+        .map(move |i| if 0 == (byte & (0x80 >> i)) { 0 } else { 1 })
 }
 
 pub fn bits_to_byte<M: IntoParallelIterator<Item = u8>>(bits: M) -> u8
@@ -46,11 +48,10 @@ where
         .sum()
 }
 
-
 #[cfg(test)]
 mod test {
-    use rayon::iter::IntoParallelRefIterator;
     use super::*;
+    use rayon::iter::IntoParallelRefIterator;
 
     #[test]
     fn test_shl_array() {
