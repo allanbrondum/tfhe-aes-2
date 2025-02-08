@@ -9,39 +9,39 @@ use rayon::iter::ParallelIterator;
 use std::sync::OnceLock;
 use std::time::Instant;
 
+use crate::tfhe::ContextT;
 use tfhe::shortint::wopbs::ShortintWopbsLUT;
 use tracing::debug;
 
 impl ByteT for Byte<BitCt> {
-    fn bootstrap(&self) -> Self {
+    fn bootstrap_assign(&mut self) {
         let context = &self.bits().find_first(|_| true).unwrap().context;
 
         static IDENTITY_LUT: OnceLock<ShortintWopbsLUT> = OnceLock::new();
-        let lut = IDENTITY_LUT.get_or_init(|| IntByte::generate_lookup_table(context, |byte| byte));
+        let lut = IDENTITY_LUT.get_or_init(|| context.generate_lookup_table(|byte| byte));
 
-        self.bootstrap_with_lut(lut)
+        *self = self.bootstrap_with_lut(context, lut);
     }
 
     fn aes_substitute(&self) -> Self {
         let context = &self.bits().find_first(|_| true).unwrap().context;
 
         static SBOX_LUT: OnceLock<ShortintWopbsLUT> = OnceLock::new();
-        let lut = SBOX_LUT.get_or_init(|| {
-            IntByte::generate_lookup_table(context, |byte| SBOX[byte as usize].into())
-        });
+        let lut = SBOX_LUT
+            .get_or_init(|| context.generate_lookup_table(|byte| SBOX[byte as usize].into()));
 
-        self.bootstrap_with_lut(lut)
+        self.bootstrap_with_lut(context, lut)
     }
 }
 
 impl Byte<BitCt> {
-    fn bootstrap_with_lut(&self, lut: &ShortintWopbsLUT) -> Self {
+    fn bootstrap_with_lut(&self, context: &FheContext, lut: &ShortintWopbsLUT) -> Self {
         let start = Instant::now();
-        let int_byte = IntByte::bootstrap_from_bits(self, lut);
+        let int_byte = context.bootstrap_from_bits(&self, lut);
         debug!("boot int {:?}", start.elapsed());
 
         let start = Instant::now();
-        let byte = Byte::extract_bits_from_int_byte(&int_byte);
+        let byte = context.extract_bits_from_int_byte(&int_byte);
         debug!("extract bits {:?}", start.elapsed());
 
         byte
@@ -50,7 +50,6 @@ impl Byte<BitCt> {
 
 #[cfg(test)]
 mod test {
-
     use crate::aes_128::test_helper;
     use crate::logger;
     use tracing::metadata::LevelFilter;

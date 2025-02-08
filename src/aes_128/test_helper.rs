@@ -52,7 +52,8 @@ where
     rng.fill(&mut key_clear);
     rng.fill(&mut block1_clear);
     let blocks_clear = &[block1_clear];
-
+    println!("{}", hex::encode(&key_clear));
+    println!("{}", hex::encode(&block1_clear));
     let key = fhe_encryption::encrypt_byte_array(client_key, &key_clear);
     let blocks = fhe_encryption::encrypt_blocks(client_key, blocks_clear);
 

@@ -185,15 +185,15 @@ where
     Byte<Bit>: ByteT,
 {
     word.bytes_mut().for_each(|byte| {
-        *byte = boot_byte(byte);
+        boot_byte(byte);
     });
 }
 
-fn boot_byte<Bit>(byte: &Byte<Bit>) -> Byte<Bit>
+fn boot_byte<Bit>(byte: &mut Byte<Bit>)
 where
     Byte<Bit>: ByteT,
 {
-    byte.bootstrap()
+    byte.bootstrap_assign();
 }
 
 fn sub_word<Bit: BitT>(mut word: Word<Bit>) -> Word<Bit>

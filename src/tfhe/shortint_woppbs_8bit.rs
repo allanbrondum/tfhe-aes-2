@@ -179,92 +179,6 @@ impl IntByte {
     }
 }
 
-impl IntByte {
-    // todo is this a bootstrap? does it reset noise?
-    pub fn bootstrap_from_bits(byte: &Byte<BitCt>, lut: &ShortintWopbsLUT) -> Self {
-        assert_eq!(lut.as_ref().output_ciphertext_count(), CiphertextCount(1));
-        let context = &byte.bits().find_any(|_| true).unwrap().context;
-
-        let lwe_size = byte.bits().find_any(|_| true).unwrap().ct.lwe_size();
-
-        let bit_cts: Vec<_> = byte.bits().map(|bit| bit.ct.as_view()).collect();
-        let start = Instant::now();
-        let bits_data: Vec<u64> = bit_cts
-            .iter()
-            .flat_map(|bit_ct| bit_ct.into_container().iter().copied())
-            .collect();
-        trace!("copy bits data {:?}", start.elapsed());
-
-        let bits_list_ct = LweCiphertextListOwned::create_from(
-            bits_data,
-            LweCiphertextListCreationMetadata {
-                lwe_size,
-                ciphertext_modulus: CiphertextModulus::new_native(),
-            },
-        );
-
-        let lwe_ct = context
-            .wopbs_key
-            .circuit_bootstrapping_vertical_packing(lut.as_ref(), &bits_list_ct)
-            .into_iter()
-            .next()
-            .expect("one element");
-
-        let sks = &context.wopbs_key.wopbs_server_key;
-
-        let ct = shortint::Ciphertext::new(
-            lwe_ct,
-            Degree::new(sks.message_modulus.0 - 1),
-            NoiseLevel::NOMINAL,
-            sks.message_modulus,
-            sks.carry_modulus,
-            PBSOrder::KeyswitchBootstrap,
-        );
-
-        Self {
-            ct,
-            context: context.clone(),
-        }
-    }
-
-    pub fn generate_lookup_table(context: &FheContext, f: impl Fn(u64) -> u64) -> ShortintWopbsLUT {
-        let ct = context.server_key.create_trivial(0);
-        context
-            .wopbs_key
-            .generate_lut_without_padding(&ct, f)
-            .into()
-    }
-}
-
-impl Byte<BitCt> {
-    pub fn extract_bits_from_int_byte(int_byte: &IntByte) -> Self {
-        let context = &int_byte.context;
-
-        let bit_cts =
-            context
-                .wopbs_key
-                .extract_bits(DeltaLog(64 - 8), &int_byte.ct, ExtractedBitsCount(8));
-
-        let bits = util::collect_array(bit_cts.iter().map(|bit_ct| {
-            let start = Instant::now();
-            let data = bit_ct.into_container().to_vec();
-            trace!("copy bit data {:?}", start.elapsed());
-
-            BitCt::new(
-                LweCiphertextOwned::create_from(
-                    data,
-                    LweCiphertextCreationMetadata {
-                        ciphertext_modulus: CiphertextModulus::new_native(),
-                    },
-                ),
-                context.clone(),
-            )
-        }));
-
-        Self::new(bits)
-    }
-}
-
 #[derive(Clone)]
 pub struct FheContext {
     server_key: Arc<shortint::server_key::ServerKey>,
@@ -325,6 +239,81 @@ impl FheContext {
         };
 
         (ClientKey(client_key, context.clone()), context)
+    }
+
+    pub fn generate_lookup_table(&self, f: impl Fn(u64) -> u64) -> ShortintWopbsLUT {
+        let ct = self.server_key.create_trivial(0);
+        self.wopbs_key.generate_lut_without_padding(&ct, f).into()
+    }
+
+    /// Extract individual bits from 8 bit `shortint`
+    pub fn extract_bits_from_int_byte(&self, int_byte: &IntByte) -> Byte<BitCt> {
+        let bit_cts =
+            self.wopbs_key
+                .extract_bits(DeltaLog(64 - 8), &int_byte.ct, ExtractedBitsCount(8));
+
+        let bits = util::collect_array(bit_cts.iter().map(|bit_ct| {
+            let start = Instant::now();
+            let data = bit_ct.into_container().to_vec();
+            trace!("copy bit data {:?}", start.elapsed());
+
+            BitCt::new(
+                LweCiphertextOwned::create_from(
+                    data,
+                    LweCiphertextCreationMetadata {
+                        ciphertext_modulus: CiphertextModulus::new_native(),
+                    },
+                ),
+                self.clone(),
+            )
+        }));
+
+        Byte::new(bits)
+    }
+
+    // todo is this a bootstrap? does it reset noise?
+    /// Functional bootstrap of 8 bit `shortint` from individual bits
+    pub fn bootstrap_from_bits(&self, byte: &Byte<BitCt>, lut: &ShortintWopbsLUT) -> IntByte {
+        assert_eq!(lut.as_ref().output_ciphertext_count(), CiphertextCount(1));
+
+        let lwe_size = byte.bits().find_any(|_| true).unwrap().ct.lwe_size();
+
+        let bit_cts: Vec<_> = byte.bits().map(|bit| bit.ct.as_view()).collect();
+        let start = Instant::now();
+        let mut bits_data =
+            Vec::with_capacity(bit_cts.iter().map(|bit_ct| bit_ct.data.len()).sum());
+        for bit_ct in bit_cts {
+            bits_data.extend(bit_ct.data);
+        }
+        trace!("copy bits data {:?}", start.elapsed());
+
+        let bits_list_ct = LweCiphertextListOwned::create_from(
+            bits_data,
+            LweCiphertextListCreationMetadata {
+                lwe_size,
+                ciphertext_modulus: CiphertextModulus::new_native(),
+            },
+        );
+
+        let lwe_ct = self
+            .wopbs_key
+            .circuit_bootstrapping_vertical_packing(lut.as_ref(), &bits_list_ct)
+            .into_iter()
+            .next()
+            .expect("one element");
+
+        let sks = &self.wopbs_key.wopbs_server_key;
+
+        let ct = shortint::Ciphertext::new(
+            lwe_ct,
+            Degree::new(sks.message_modulus.0 - 1),
+            NoiseLevel::NOMINAL,
+            sks.message_modulus,
+            sks.carry_modulus,
+            PBSOrder::KeyswitchBootstrap,
+        );
+
+        IntByte::new(ct, self.clone())
     }
 }
 
@@ -394,8 +383,8 @@ pub mod test {
         let byte = 0b10110101;
         let byte_fhe = encrypt_byte(client_key.as_ref(), byte);
 
-        let lut = IntByte::generate_lookup_table(&context, |val| val);
-        let int_byte_fhe = IntByte::bootstrap_from_bits(&byte_fhe, &lut);
+        let lut = context.generate_lookup_table(|val| val);
+        let int_byte_fhe = context.bootstrap_from_bits(&byte_fhe, &lut);
 
         let decrypted = client_key.0.decrypt_without_padding(&int_byte_fhe.ct);
         assert_eq!(decrypted, 0b10110101);
@@ -413,8 +402,8 @@ pub mod test {
 
         let byte_fhe = byte_fhe ^ byte_fhe2.clone();
 
-        let lut = IntByte::generate_lookup_table(&context, |val| val);
-        let int_byte_fhe = IntByte::bootstrap_from_bits(&byte_fhe, &lut);
+        let lut = context.generate_lookup_table(|val| val);
+        let int_byte_fhe = context.bootstrap_from_bits(&byte_fhe, &lut);
 
         let decrypted_int_byte = client_key.0.decrypt_without_padding(&int_byte_fhe.ct) as u8;
         let decrypted_bits_byte = decrypt_byte(client_key.as_ref(), &byte_fhe);
@@ -428,8 +417,8 @@ pub mod test {
         let byte = 0b10110101;
         let byte_fhe = encrypt_byte(client_key.as_ref(), byte);
 
-        let lut = IntByte::generate_lookup_table(&context, |val| val + 3);
-        let int_byte_fhe = IntByte::bootstrap_from_bits(&byte_fhe, &lut);
+        let lut = context.generate_lookup_table(|val| val + 3);
+        let int_byte_fhe = context.bootstrap_from_bits(&byte_fhe, &lut);
 
         let decrypted = client_key.0.decrypt_without_padding(&int_byte_fhe.ct);
         assert_eq!(decrypted, 0b10110101 + 3);
@@ -439,8 +428,11 @@ pub mod test {
     fn test_extract_bits_from_int_byte() {
         let (client_key, context) = KEYS.clone();
 
-        let int_byte_fhe = IntByte::new(client_key.0.encrypt_without_padding(0b10110101), context);
-        let byte_fhe = Byte::extract_bits_from_int_byte(&int_byte_fhe);
+        let int_byte_fhe = IntByte::new(
+            client_key.0.encrypt_without_padding(0b10110101),
+            context.clone(),
+        );
+        let byte_fhe = context.extract_bits_from_int_byte(&int_byte_fhe);
 
         let byte = decrypt_byte(client_key.as_ref(), &byte_fhe);
         assert_eq!(byte, 0b10110101);

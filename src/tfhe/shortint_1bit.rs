@@ -1,12 +1,12 @@
 //! Model with each ciphertext representing 1 bit. Build on `tfhe-rs` `shortint` module but with
 //! additional primitives for multivariate function bootstrapping
 
+use crate::tfhe::{ClientKeyT, ContextT};
 use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 use std::iter;
-
-use crate::tfhe::{ClientKeyT, ContextT};
+use std::ops::{BitXor, BitXorAssign};
 use std::sync::Arc;
 use std::time::Instant;
 use tfhe::core_crypto::algorithms::{
@@ -48,7 +48,7 @@ const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
 #[derive(Clone)]
 pub struct BitCt {
     ct: shortint::Ciphertext,
-    context: FheContext,
+    pub context: FheContext,
 }
 
 impl BitCt {
@@ -58,6 +58,29 @@ impl BitCt {
 
     pub fn trivial(bit: Cleartext<u64>, context: FheContext) -> Self {
         Self::new(context.server_key.create_trivial(bit.0), context)
+    }
+}
+
+impl BitXorAssign<&BitCt> for BitCt {
+    fn bitxor_assign(&mut self, rhs: &Self) {
+        self.context
+            .server_key
+            .unchecked_add_assign(&mut self.ct, &rhs.ct);
+    }
+}
+
+impl BitXor for BitCt {
+    type Output = Self;
+
+    fn bitxor(mut self, rhs: Self) -> Self::Output {
+        self.bitxor_assign(&rhs);
+        self
+    }
+}
+
+impl Debug for BitCt {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BitCt").field("ct", &self.ct).finish()
     }
 }
 
@@ -414,11 +437,11 @@ fn apply_selectors_rec(
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use super::*;
     use std::sync::LazyLock;
 
-    static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(keys_impl);
+    pub static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(keys_impl);
 
     fn keys_impl() -> (Arc<ClientKey>, FheContext) {
         let (client_key, context) = FheContext::generate_keys();

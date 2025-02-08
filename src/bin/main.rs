@@ -1,5 +1,5 @@
 use anyhow::Context;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
@@ -8,19 +8,32 @@ use tfhe_aes::aes_128;
 use tfhe_aes::aes_128::fhe::data_model::{BitT, Block, Byte, ByteT};
 use tfhe_aes::aes_128::{aes_lib, fhe, fhe_encryption};
 
-use tfhe_aes::tfhe::{shortint_woppbs_8bit, ClientKeyT, ContextT};
+use tfhe_aes::tfhe::{shortint_1bit, shortint_woppbs_8bit, ClientKeyT, ContextT};
 use tracing::debug;
 
+#[derive(Debug, Clone, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+enum Implementation {
+    Shortint1bit,
+    ShortintWoppbs8bit,
+}
+
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
 struct Args {
+    #[arg(long)]
     number_of_outputs: usize,
+    #[arg(long)]
     iv: String,
+    #[arg(long)]
     key: String,
+    #[arg(long,value_enum, default_value_t = Implementation::ShortintWoppbs8bit)]
+    implementation: Implementation,
 }
 
 fn main() -> anyhow::Result<()> {
     let args: Args = Args::parse();
+
+    println!("using implementation: {:?}", args.implementation);
 
     let key: aes_128::Key = hex::decode(&args.key)
         .context("hex decode key")?
@@ -34,10 +47,16 @@ fn main() -> anyhow::Result<()> {
         .ok()
         .context("invalid iv length, must be 8 bytes")?;
 
-    // Client side: generate keys
-    let (client_key, context) = shortint_woppbs_8bit::FheContext::generate_keys();
-
-    run_client_server_aes_scenario(&client_key, &context, key, iv, args.number_of_outputs);
+    match args.implementation {
+        Implementation::Shortint1bit => {
+            let (client_key, context) = shortint_1bit::FheContext::generate_keys();
+            run_client_server_aes_scenario(&client_key, &context, key, iv, args.number_of_outputs);
+        }
+        Implementation::ShortintWoppbs8bit => {
+            let (client_key, context) = shortint_woppbs_8bit::FheContext::generate_keys();
+            run_client_server_aes_scenario(&client_key, &context, key, iv, args.number_of_outputs);
+        }
+    }
 
     Ok(())
 }

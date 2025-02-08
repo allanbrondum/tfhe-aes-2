@@ -15,7 +15,7 @@ pub trait BitT:
 
 pub trait ByteT: Sized {
     /// Bootstrap to reset noise
-    fn bootstrap(&self) -> Self;
+    fn bootstrap_assign(&mut self);
 
     /// Perform AES SubBytes on this byte while also resetting noise
     fn aes_substitute(&self) -> Self;
