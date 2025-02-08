@@ -166,10 +166,25 @@ pub fn expand_key_and_encrypt_blocks(key: Key, blocks: &[Block], rounds: usize) 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::aes_128::test_helper;
+    use crate::aes_128;
+    use crate::aes_128::{aes_lib, ROUNDS};
+    use rand::{Rng, SeedableRng};
+    use rand_chacha::ChaCha20Rng;
 
     #[test]
     fn test_plain() {
-        test_helper::test_vs_aes(expand_key_and_encrypt_blocks);
+        let seed: [u8; 32] = Default::default();
+        let mut rng = ChaCha20Rng::from_seed(seed);
+        let mut key: aes_128::Key = Default::default();
+        let mut block1: aes_128::Block = Default::default();
+        let mut block2: aes_128::Block = Default::default();
+        rng.fill(&mut key);
+        rng.fill(&mut block1);
+        rng.fill(&mut block2);
+        let blocks = &[block1, block2];
+
+        let encrypted = expand_key_and_encrypt_blocks(key, blocks, ROUNDS);
+
+        assert_eq!(encrypted, aes_lib::encrypt_blocks(key, blocks));
     }
 }

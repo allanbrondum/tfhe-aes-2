@@ -2,13 +2,13 @@
 //! additional primitives for multivariate function bootstrapping
 
 use crate::aes_128::fhe::data_model::{BitT, Byte};
-use crate::tfhe::ClientKeyT;
+use crate::tfhe::{ClientKeyT, ContextT};
 use crate::util;
 use rayon::iter::ParallelIterator;
 
 use std::fmt::{Debug, Formatter};
 use std::ops::{BitXor, BitXorAssign};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Instant;
 use tfhe::core_crypto::prelude::*;
 use tfhe::shortint;
@@ -92,6 +92,8 @@ pub struct BitCt {
     pub context: FheContext,
 }
 
+impl BitT for BitCt {}
+
 impl Debug for BitCt {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BitCt")
@@ -161,36 +163,6 @@ impl BitXor for BitCt {
     fn bitxor(mut self, rhs: Self) -> Self::Output {
         self.bitxor_assign(&rhs);
         self
-    }
-}
-
-static CONTEXT: OnceLock<FheContext> = OnceLock::new();
-
-impl Default for BitCt {
-    fn default() -> Self {
-        <BitCt as BitT>::trivial(Cleartext(0))
-    }
-}
-
-impl BitT for BitCt {
-    fn trivial(bit: Cleartext<u8>) -> Self {
-        let context = CONTEXT.get().expect("context").clone();
-
-        let ct = lwe_encryption::allocate_and_trivially_encrypt_new_lwe_ciphertext(
-            context
-                .server_key
-                .bootstrapping_key
-                .input_lwe_dimension()
-                .to_lwe_size(),
-            encode_bit(Cleartext(bit.0 as u64)),
-            CiphertextModulus::new_native(),
-        );
-
-        Self {
-            ct,
-            noise_level: NoiseLevel::ZERO,
-            context,
-        }
     }
 }
 
@@ -299,9 +271,19 @@ pub struct FheContext {
     wopbs_key: Arc<shortint::wopbs::WopbsKey>,
 }
 
+impl ContextT for FheContext {
+    type Bit = BitCt;
+
+    fn trivial(&self, bit: Cleartext<u64>) -> BitCt {
+        BitCt::trivial(bit, self.clone())
+    }
+}
+
 pub struct ClientKey(shortint::ClientKey, FheContext);
 
-impl ClientKeyT<BitCt> for ClientKey {
+impl ClientKeyT for ClientKey {
+    type Bit = BitCt;
+
     fn encrypt(&self, bit: Cleartext<u64>) -> BitCt {
         let (encryption_lwe_sk, encryption_noise_distribution) = (
             &self.0.lwe_secret_key,
@@ -342,25 +324,18 @@ impl FheContext {
             wopbs_key: wops_key.into(),
         };
 
-        // "hack" to allow creating default and trivial values without passing context around.
-        // works as long as we only generate one set of keys in the application
-        CONTEXT
-            .set(context.clone())
-            .map_err(|_| ())
-            .expect("context already set");
-
         (ClientKey(client_key, context.clone()), context)
     }
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use super::*;
 
-    use crate::aes_128::fhe_encryption::{fhe_decrypt_byte, fhe_encrypt_byte};
+    use crate::aes_128::fhe_encryption::{decrypt_byte, encrypt_byte};
     use std::sync::{Arc, LazyLock};
 
-    static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(keys_impl);
+    pub static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(keys_impl);
 
     fn keys_impl() -> (Arc<ClientKey>, FheContext) {
         let (client_key, context) = FheContext::generate_keys();
@@ -398,9 +373,8 @@ mod test {
         assert_eq!(client_key.decrypt(&(b2.clone() ^ b2.clone())), Cleartext(0));
 
         // default/trivial
-        assert_eq!(client_key.decrypt(&BitCt::default()), Cleartext(0));
         assert_eq!(
-            client_key.decrypt(&(b2.clone() ^ BitCt::default())),
+            client_key.decrypt(&(b2.clone() ^ BitCt::trivial(Cleartext(0), context.clone()))),
             Cleartext(1)
         );
         assert_eq!(
@@ -418,7 +392,7 @@ mod test {
         let (client_key, context) = KEYS.clone();
 
         let byte = 0b10110101;
-        let byte_fhe = fhe_encrypt_byte(client_key.as_ref(), byte);
+        let byte_fhe = encrypt_byte(client_key.as_ref(), byte);
 
         let lut = IntByte::generate_lookup_table(&context, |val| val);
         let int_byte_fhe = IntByte::bootstrap_from_bits(&byte_fhe, &lut);
@@ -432,10 +406,10 @@ mod test {
         let (client_key, context) = KEYS.clone();
 
         let byte = 0b10110101;
-        let byte_fhe = fhe_encrypt_byte(client_key.as_ref(), byte);
+        let byte_fhe = encrypt_byte(client_key.as_ref(), byte);
 
         let byte2 = 0b01100110;
-        let byte_fhe2 = fhe_encrypt_byte(client_key.as_ref(), byte2);
+        let byte_fhe2 = encrypt_byte(client_key.as_ref(), byte2);
 
         let byte_fhe = byte_fhe ^ byte_fhe2.clone();
 
@@ -443,7 +417,7 @@ mod test {
         let int_byte_fhe = IntByte::bootstrap_from_bits(&byte_fhe, &lut);
 
         let decrypted_int_byte = client_key.0.decrypt_without_padding(&int_byte_fhe.ct) as u8;
-        let decrypted_bits_byte = fhe_decrypt_byte(client_key.as_ref(), &byte_fhe);
+        let decrypted_bits_byte = decrypt_byte(client_key.as_ref(), &byte_fhe);
         assert_eq!(decrypted_int_byte, decrypted_bits_byte);
     }
 
@@ -452,7 +426,7 @@ mod test {
         let (client_key, context) = KEYS.clone();
 
         let byte = 0b10110101;
-        let byte_fhe = fhe_encrypt_byte(client_key.as_ref(), byte);
+        let byte_fhe = encrypt_byte(client_key.as_ref(), byte);
 
         let lut = IntByte::generate_lookup_table(&context, |val| val + 3);
         let int_byte_fhe = IntByte::bootstrap_from_bits(&byte_fhe, &lut);
@@ -468,7 +442,7 @@ mod test {
         let int_byte_fhe = IntByte::new(client_key.0.encrypt_without_padding(0b10110101), context);
         let byte_fhe = Byte::extract_bits_from_int_byte(&int_byte_fhe);
 
-        let byte = fhe_decrypt_byte(client_key.as_ref(), &byte_fhe);
+        let byte = decrypt_byte(client_key.as_ref(), &byte_fhe);
         assert_eq!(byte, 0b10110101);
     }
 

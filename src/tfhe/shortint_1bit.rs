@@ -6,7 +6,7 @@ use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::fmt::Debug;
 use std::iter;
 
-use crate::tfhe::ClientKeyT;
+use crate::tfhe::{ClientKeyT, ContextT};
 use std::sync::Arc;
 use std::time::Instant;
 use tfhe::core_crypto::algorithms::{
@@ -56,22 +56,9 @@ impl BitCt {
         Self { ct, context }
     }
 
-    // pub fn trivial(bit: u64, context: FheContext) -> Self {
-    //     let ct = lwe_encryption::allocate_and_trivially_encrypt_new_lwe_ciphertext(
-    //         context
-    //             .server_key
-    //             .bootstrapping_key
-    //             .input_lwe_dimension()
-    //             .to_lwe_size(),
-    //         Self::encode(b),
-    //         CiphertextModulus::new_native(),
-    //     );
-    //
-    //     Self {
-    //         ct,
-    //         context,
-    //     }
-    // }
+    pub fn trivial(bit: Cleartext<u64>, context: FheContext) -> Self {
+        Self::new(context.server_key.create_trivial(bit.0), context)
+    }
 }
 
 #[derive(Clone)]
@@ -80,9 +67,19 @@ pub struct FheContext {
     packing_keyswitch_key: Arc<LwePackingKeyswitchKeyOwned<u64>>,
 }
 
+impl ContextT for FheContext {
+    type Bit = BitCt;
+
+    fn trivial(&self, bit: Cleartext<u64>) -> BitCt {
+        BitCt::trivial(bit, self.clone())
+    }
+}
+
 pub struct ClientKey(shortint::ClientKey, FheContext);
 
-impl ClientKeyT<BitCt> for ClientKey {
+impl ClientKeyT for ClientKey {
+    type Bit = BitCt;
+
     fn encrypt(&self, bit: Cleartext<u64>) -> BitCt {
         let ct = self.0.encrypt(bit.0);
         BitCt::new(ct, self.1.clone())

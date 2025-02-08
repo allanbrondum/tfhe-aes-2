@@ -7,10 +7,11 @@ use crate::aes_128::fhe::data_model::{BitT, Block, Byte, ByteT, State, Word};
 use crate::aes_128::{RC, ROUNDS};
 use crate::util;
 use rayon::iter::IndexedParallelIterator;
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator};
+use rayon::iter::IntoParallelIterator;
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use std::array;
 
+use crate::tfhe::ContextT;
 use tracing::debug;
 
 fn substitute<Bit>(byte: &Byte<Bit>) -> Byte<Bit>
@@ -42,14 +43,17 @@ fn shift_rows<Bit: BitT>(state: &mut State<Bit>) {
 }
 
 /// Multiplication in F_2[X]/(X^8 + X^4 + X^3 + X + 1)
-fn gf_256_mul<Bit: BitT>(a: &Byte<Bit>, mut b: u8) -> Byte<Bit> {
+fn gf_256_mul<Ctx: ContextT>(ctx: &Ctx, a: &Byte<Ctx::Bit>, mut b: u8) -> Byte<Ctx::Bit>
+where
+    Ctx::Bit: BitT,
+{
     let mut a = a.clone();
-    let mut res = Byte::default();
+    let mut res = Byte::trivial(ctx, 0);
     for _ in 0..8 {
         if b & 1 == 1 {
             res ^= &a;
         }
-        let reduce_x8 = a.shl_assign_1();
+        let reduce_x8 = a.shl_assign_1(ctx);
 
         a[3] ^= &reduce_x8;
         a[4] ^= &reduce_x8;
@@ -62,41 +66,45 @@ fn gf_256_mul<Bit: BitT>(a: &Byte<Bit>, mut b: u8) -> Byte<Bit> {
     res
 }
 
-fn mix_columns<Bit: BitT>(state: &mut State<Bit>) {
-    let new_columns: [Word<Bit>; 4] = util::par_collect_array(
-        state
-            .columns()
-            .collect::<Vec<_>>()
-            .par_iter()
-            .map(|column| {
-                Word::new(util::par_collect_array((0..4).into_par_iter().map(|i| {
-                    gf_256_mul(&column[i], 2)
-                        ^ gf_256_mul(&column[(i - 1) % 4], 1)
-                        ^ gf_256_mul(&column[(i - 2) % 4], 1)
-                        ^ gf_256_mul(&column[(i - 3) % 4], 3)
-                })))
-            }),
-    );
+fn mix_columns<Ctx: ContextT>(ctx: &Ctx, state: &mut State<Ctx::Bit>)
+where
+    Ctx::Bit: BitT,
+{
+    let new_columns: [Word<Ctx::Bit>; 4] = util::par_collect_array(state.columns().map(|column| {
+        Word::new(util::par_collect_array((0..4).into_par_iter().map(|i| {
+            gf_256_mul(ctx, &column[i], 2)
+                ^ gf_256_mul(ctx, &column[(i - 1) % 4], 1)
+                ^ gf_256_mul(ctx, &column[(i - 2) % 4], 1)
+                ^ gf_256_mul(ctx, &column[(i - 3) % 4], 3)
+        })))
+    }));
 
     for (j, column) in new_columns.into_iter().enumerate() {
         state.column_mut(j).assign(column);
     }
 }
 
-pub fn encrypt_block<Bit: BitT>(expanded_key: &[Word<Bit>; 44], block: Block<Bit>) -> Block<Bit>
+pub fn encrypt_block<Ctx: ContextT>(
+    ctx: &Ctx,
+    expanded_key: &[Word<Ctx::Bit>; 44],
+    block: Block<Ctx::Bit>,
+) -> Block<Ctx::Bit>
 where
-    Byte<Bit>: ByteT,
+    Ctx::Bit: BitT,
+    Byte<Ctx::Bit>: ByteT,
 {
-    encrypt_block_for_rounds(expanded_key, block, ROUNDS)
+    encrypt_block_for_rounds(ctx, expanded_key, block, ROUNDS)
 }
 
-pub fn encrypt_block_for_rounds<Bit: BitT>(
-    expanded_key: &[Word<Bit>; 44],
-    block: Block<Bit>,
+pub fn encrypt_block_for_rounds<Ctx: ContextT>(
+    ctx: &Ctx,
+    expanded_key: &[Word<Ctx::Bit>; 44],
+    block: Block<Ctx::Bit>,
     rounds: usize,
-) -> Block<Bit>
+) -> Block<Ctx::Bit>
 where
-    Byte<Bit>: ByteT,
+    Ctx::Bit: BitT,
+    Byte<Ctx::Bit>: ByteT,
 {
     let mut state_fhe = State::from_array(block);
 
@@ -112,7 +120,7 @@ where
         debug!("shift_rows");
         shift_rows(&mut state_fhe);
         debug!("mix_columns");
-        mix_columns(&mut state_fhe);
+        mix_columns(ctx, &mut state_fhe);
         debug!("xor_state");
         xor_state(
             &mut state_fhe,
@@ -136,11 +144,15 @@ where
     state_fhe.into_array()
 }
 
-pub fn key_schedule<Bit: BitT>(key_slice: &[Byte<Bit>; 16]) -> [Word<Bit>; 44]
+pub fn key_schedule<Ctx: ContextT>(
+    ctx: &Ctx,
+    key_slice: &[Byte<Ctx::Bit>; 16],
+) -> [Word<Ctx::Bit>; 44]
 where
-    Byte<Bit>: ByteT,
+    Ctx::Bit: BitT,
+    Byte<Ctx::Bit>: ByteT,
 {
-    let mut expanded_key: [Word<Bit>; 44] = array::from_fn(|_| Word::default());
+    let mut expanded_key: [Word<Ctx::Bit>; 44] = array::from_fn(|_| Word::zero(ctx));
 
     for i in 0..4 {
         for j in 0..4 {
@@ -152,7 +164,7 @@ where
         if i % 4 == 0 {
             expanded_key[i] =
                 expanded_key[i - 4].clone() ^ &sub_word(expanded_key[i - 1].clone().rotate_left(1));
-            expanded_key[i][0] ^= &Byte::trivial(RC[i / 4]);
+            expanded_key[i][0] ^= &Byte::trivial(ctx, RC[i / 4]);
         } else {
             expanded_key[i] = expanded_key[i - 4].clone() ^ &expanded_key[i - 1];
         }

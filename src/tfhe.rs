@@ -3,8 +3,17 @@ use tfhe::core_crypto::entities::Cleartext;
 pub mod shortint_1bit;
 pub mod shortint_woppbs_8bit;
 
-pub trait ClientKeyT<Bit> {
-    fn encrypt(&self, bit: Cleartext<u64>) -> Bit;
+pub trait ClientKeyT: Send + Sync {
+    type Bit: Send + Sync;
 
-    fn decrypt(&self, bit: &Bit) -> Cleartext<u64>;
+    fn encrypt(&self, bit: Cleartext<u64>) -> Self::Bit;
+
+    fn decrypt(&self, bit: &Self::Bit) -> Cleartext<u64>;
+}
+
+pub trait ContextT: Send + Sync {
+    type Bit: Send + Sync;
+
+    /// Returns unencrypted ciphertext
+    fn trivial(&self, bit: Cleartext<u64>) -> Self::Bit;
 }

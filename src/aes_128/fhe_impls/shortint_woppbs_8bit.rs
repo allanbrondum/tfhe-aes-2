@@ -48,42 +48,34 @@ impl Byte<BitCt> {
     }
 }
 
-// #[cfg(test)]
-// mod test {
-//     use rayon::iter::IndexedParallelIterator;
-//     use super::*;
-//     use crate::aes_128::{test_helper, ROUNDS};
-//     use crate::logger;
-//     use tracing::metadata::LevelFilter;
-//
-//     #[test]
-//     fn test_encrypt_two_rounds() {
-//         logger::init(LevelFilter::INFO);
-//
-//         // rayon::ThreadPoolBuilder::new()
-//         //     .num_threads(16)
-//         //     .build_global()
-//         //     .unwrap();
-//         // debug!("current_num_threads: {}", rayon::current_num_threads());
-//
-//         test_helper::test_vs_plain(expand_key_and_encrypt_blocks, 2);
-//     }
-//
-//     #[test]
-//     fn test_encrypt_all_rounds() {
-//         logger::init(LevelFilter::INFO);
-//
-//         test_helper::test_vs_plain(expand_key_and_encrypt_blocks, ROUNDS);
-//     }
-//     #[test]
-//     fn testing() {
-//         let max = (0..1_000_000)
-//             .into_par_iter()
-//             // .with_max_len(1234)
-//             .fold(|| 0, |acc, a| acc + 1) // count how many are in this segment
-//             .max()
-//             .unwrap();
-//
-//         println!("{}", max);
-//     }
-// }
+#[cfg(test)]
+mod test {
+
+    use crate::aes_128::test_helper;
+    use crate::logger;
+    use tracing::metadata::LevelFilter;
+
+    #[test]
+    fn test_two_rounds() {
+        logger::init(LevelFilter::INFO);
+
+        // rayon::ThreadPoolBuilder::new()
+        //     .num_threads(16)
+        //     .build_global()
+        //     .unwrap();
+        // debug!("current_num_threads: {}", rayon::current_num_threads());
+
+        let (client_key, ctx) = crate::tfhe::shortint_woppbs_8bit::test::KEYS.clone();
+
+        test_helper::test_vs_plain(client_key.as_ref(), &ctx, 2);
+    }
+
+    #[test]
+    fn test_vs_aes() {
+        logger::init(LevelFilter::INFO);
+
+        let (client_key, ctx) = crate::tfhe::shortint_woppbs_8bit::test::KEYS.clone();
+
+        test_helper::test_vs_aes(client_key.as_ref(), &ctx);
+    }
+}
