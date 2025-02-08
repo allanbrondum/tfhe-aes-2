@@ -1,9 +1,7 @@
 use crate::aes_128::{aes_lib, plain, Block, Key, ROUNDS};
-use aes::cipher::{BlockEncrypt, KeyInit};
+
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
-
-
 
 pub fn test_vs_aes(encrypt_fn: fn(key: Key, blocks: &[Block], rounds: usize) -> Vec<Block>) {
     let seed: [u8; 32] = Default::default();

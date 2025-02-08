@@ -4,30 +4,23 @@
 use crate::aes_128::fhe::data_model::{BitT, Byte};
 use crate::tfhe::ClientKeyT;
 use crate::util;
-use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use rayon::iter::{IntoParallelRefIterator, ParallelBridge};
+use rayon::iter::ParallelIterator;
+
 use std::fmt::{Debug, Formatter};
-use std::iter;
-use std::ops::{BitAnd, BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
+use std::ops::{BitXor, BitXorAssign};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
-use tfhe::core_crypto::algorithms::{
-    glwe_sample_extraction, lwe_keyswitch, lwe_programmable_bootstrapping,
-};
-use tfhe::core_crypto::entities::{
-    Cleartext, GlweCiphertext, GlweCiphertextMutView, GlweCiphertextOwned, LweCiphertextView,
-};
 use tfhe::core_crypto::prelude::*;
 use tfhe::shortint;
 use tfhe::shortint::ciphertext::{Degree, NoiseLevel};
 use tfhe::shortint::engine::ShortintEngine;
-use tfhe::shortint::server_key::ShortintBootstrappingKey;
+
 use tfhe::shortint::wopbs::{ShortintWopbsLUT, WopbsKey};
 use tfhe::shortint::{
     CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus, ShortintParameterSet,
     WopbsParameters,
 };
-use tracing::{debug, trace};
+use tracing::trace;
 
 /// Parameters created from
 ///
@@ -364,15 +357,8 @@ impl FheContext {
 mod test {
     use super::*;
 
-    use std::sync::{Arc, LazyLock};
-    use std::time::Instant;
-    use tfhe::core_crypto::prelude::*;
-    use tfhe::shortint::wopbs::WopbsKey;
-    use tfhe::shortint::{
-        CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus, ShortintParameterSet,
-        WopbsParameters,
-    };
     use crate::aes_128::fhe_encryption::{fhe_decrypt_byte, fhe_encrypt_byte};
+    use std::sync::{Arc, LazyLock};
 
     static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(|| keys_impl());
 
@@ -401,7 +387,7 @@ mod test {
     fn test_bit() {
         let (client_key, context) = KEYS.clone();
 
-        let mut b1 = client_key.encrypt(Cleartext(0));
+        let b1 = client_key.encrypt(Cleartext(0));
         let b2 = client_key.encrypt(Cleartext(1));
 
         assert_eq!(client_key.decrypt(&b1), Cleartext(0));

@@ -1,11 +1,12 @@
 //! Model with each ciphertext representing 1 bit. Build on `tfhe-rs` `shortint` module but with
 //! additional primitives for multivariate function bootstrapping
 
+use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use rayon::iter::{IntoParallelRefIterator, ParallelBridge};
 use std::fmt::Debug;
 use std::iter;
-use std::ops::{BitAnd, BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
+
+use crate::tfhe::ClientKeyT;
 use std::sync::Arc;
 use std::time::Instant;
 use tfhe::core_crypto::algorithms::{
@@ -21,7 +22,6 @@ use tfhe::shortint::engine::ShortintEngine;
 use tfhe::shortint::server_key::ShortintBootstrappingKey;
 use tfhe::shortint::{CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus};
 use tracing::debug;
-use crate::tfhe::ClientKeyT;
 
 const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
     lwe_dimension: LweDimension(692),
@@ -288,7 +288,7 @@ fn test_vector_from_cleartext_fn(
     );
 
     let mut acc_body = acc.get_mut_body();
-    let mut body_slice = acc_body.as_mut();
+    let body_slice = acc_body.as_mut();
 
     // Fill accumulator with f evaluated at 0 and 1
     let box_size = polynomial_size.0 / 2;
@@ -322,7 +322,7 @@ fn test_vector_from_ciphertexts(
         .copied()
         .collect();
 
-    let mut ciphertext_list = LweCiphertextListOwned::from_container(
+    let ciphertext_list = LweCiphertextListOwned::from_container(
         list_data,
         packing_keyswitch_key
             .input_key_lwe_dimension()
@@ -419,8 +419,7 @@ fn apply_selectors_rec<'a>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::sync::{LazyLock, OnceLock};
-    use tfhe::core_crypto::prelude::*;
+    use std::sync::LazyLock;
 
     static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(|| keys_impl());
 

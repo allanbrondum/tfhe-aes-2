@@ -1,14 +1,13 @@
 use crate::util;
-use rayon::iter::ParallelIterator;
+
 use rayon::iter::{
-    IntoParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelBridge,
+    IntoParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
 use rayon::prelude::IndexedParallelIterator;
 use std::fmt::Debug;
 use std::mem;
-use std::ops::{BitAnd, BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
+use std::ops::{BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
 use tfhe::core_crypto::entities::Cleartext;
-use tfhe::core_crypto::prelude::ContiguousEntityContainer;
 
 pub trait BitT:
     for<'a> BitXorAssign<&'a Self> + Send + Sync + Clone + Debug + Default + Sized + 'static

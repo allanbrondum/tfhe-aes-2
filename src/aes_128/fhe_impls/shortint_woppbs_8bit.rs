@@ -1,14 +1,14 @@
 //! Implementation of AES-128 using 8 bit `shortint` WoP-PBS
 
-use crate::aes_128::fhe::data_model::{Block, Byte, ByteT, Word};
-use crate::aes_128::{fhe, plain, Key, SBOX};
+use crate::aes_128::fhe::data_model::{Byte, ByteT};
+use crate::aes_128::SBOX;
 use crate::tfhe::shortint_woppbs_8bit::*;
-use crate::{aes_128, util};
+
 use rayon::iter::ParallelIterator;
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator};
+
 use std::sync::OnceLock;
 use std::time::Instant;
-use tfhe::core_crypto::entities::Cleartext;
+
 use tfhe::shortint::wopbs::ShortintWopbsLUT;
 use tracing::debug;
 
@@ -47,9 +47,6 @@ impl Byte<BitCt> {
         byte
     }
 }
-
-
-
 
 // #[cfg(test)]
 // mod test {

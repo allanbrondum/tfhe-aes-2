@@ -7,11 +7,10 @@ use crate::aes_128::fhe::data_model::{BitT, Block, Byte, ByteT, State, Word};
 use crate::aes_128::{RC, ROUNDS};
 use crate::util;
 use rayon::iter::IndexedParallelIterator;
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelBridge};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator};
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use std::array;
-use std::fmt::Debug;
-use std::ops::{BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
+
 use tracing::debug;
 
 fn substitute<Bit>(byte: &Byte<Bit>) -> Byte<Bit>
@@ -84,15 +83,11 @@ fn mix_columns<Bit: BitT>(state: &mut State<Bit>) {
     }
 }
 
-pub fn encrypt_block<Bit: BitT>(
-    expanded_key: &[Word<Bit>; 44],
-    block: Block<Bit>,
-    rounds: usize,
-) -> Block<Bit>
+pub fn encrypt_block<Bit: BitT>(expanded_key: &[Word<Bit>; 44], block: Block<Bit>) -> Block<Bit>
 where
     Byte<Bit>: ByteT,
 {
-    encrypt_block(expanded_key, block, ROUNDS)
+    encrypt_block_for_rounds(expanded_key, block, ROUNDS)
 }
 
 pub fn encrypt_block_for_rounds<Bit: BitT>(
@@ -145,7 +140,6 @@ pub fn key_schedule<Bit: BitT>(key_slice: &[Byte<Bit>; 16]) -> [Word<Bit>; 44]
 where
     Byte<Bit>: ByteT,
 {
-    let mut key: [Word<Bit>; 4] = Default::default();
     let mut expanded_key: [Word<Bit>; 44] = array::from_fn(|_| Word::default());
 
     for i in 0..4 {
