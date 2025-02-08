@@ -8,7 +8,7 @@ use std::fmt::{Debug, Formatter};
 
 use crate::tfhe::engine::ShortintEngine;
 use std::ops::{BitXor, BitXorAssign};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Instant;
 use tfhe::core_crypto::algorithms::{
     glwe_sample_extraction, lwe_keyswitch, lwe_programmable_bootstrapping,
@@ -23,20 +23,20 @@ use tfhe::shortint::server_key::ShortintBootstrappingKey;
 use tfhe::shortint::{CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus};
 use tracing::debug;
 
-/// Parameters created from
-///
-/// ```text
-/// ./optimizer  --min-precision 1 --max-precision 1 --p-error 5.42101086e-20 --ciphertext-modulus-log 64
-/// security level: 128
-/// target p_error: 5.4e-20
-/// per precision and log norm2:
-///
-///   - 1: # bits
-///     -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b,  cost, p_error
-///     ...
-///     - 7 :   4,  9,  684,    1, 23,     3,  4,     57, 2.2e-20
-///     ...
-/// ```
+// /// Parameters created from
+// ///
+// /// ```text
+// /// ./optimizer  --min-precision 1 --max-precision 1 --p-error 5.42101086e-20 --ciphertext-modulus-log 64
+// /// security level: 128
+// /// target p_error: 5.4e-20
+// /// per precision and log norm2:
+// ///
+// ///   - 1: # bits
+// ///     -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b,  cost, p_error
+// ///     ...
+// ///     - 7 :   4,  9,  684,    1, 23,     3,  4,     57, 2.2e-20
+// ///     ...
+// /// ```
 // const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
 //     lwe_dimension: LweDimension(684),
 //     glwe_dimension: GlweDimension(4),
@@ -47,10 +47,10 @@ use tracing::debug;
 //     glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
 //         2.845267479601915e-15,
 //     )),
-//     pbs_base_log: DecompositionBaseLog(23),
 //     pbs_level: DecompositionLevelCount(1),
-//     ks_base_log: DecompositionBaseLog(4),
+//     pbs_base_log: DecompositionBaseLog(23),
 //     ks_level: DecompositionLevelCount(3),
+//     ks_base_log: DecompositionBaseLog(4),
 //     message_modulus: MessageModulus(2),
 //     carry_modulus: CarryModulus(1),
 //     max_noise_level: MaxNoiseLevel::new(11),
@@ -65,15 +65,15 @@ const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
     glwe_dimension: GlweDimension(4),
     polynomial_size: PolynomialSize(512),
     lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-        4.7280002450549286e-07,
+        4.728000245054929e-7,
     )),
     glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
         2.845267479601915e-15,
     )),
-    pbs_base_log: DecompositionBaseLog(6),
     pbs_level: DecompositionLevelCount(7),
-    ks_base_log: DecompositionBaseLog(6),
+    pbs_base_log: DecompositionBaseLog(6),
     ks_level: DecompositionLevelCount(2),
+    ks_base_log: DecompositionBaseLog(6),
     message_modulus: MessageModulus(2),
     carry_modulus: CarryModulus(1),
     max_noise_level: MaxNoiseLevel::new(11),
@@ -557,7 +557,7 @@ fn apply_selectors_rec(
             .par_iter()
             .map(|tv| context.bootstrap(selector, tv))
             .chunks(2)
-            .map(|mut tv| context.test_vector_from_ciphertexts(&tv[0], &tv[1]))
+            .map(|tv| context.test_vector_from_ciphertexts(&tv[0], &tv[1]))
             .collect();
         debug!(
             "applied mv selectors {:?}, missing {} levels",
@@ -661,7 +661,7 @@ pub mod test {
 
     #[test]
     fn test_bivariate_fn_3() {
-        logger::init(LevelFilter::DEBUG);
+        logger::test_init(LevelFilter::DEBUG);
 
         test_bivariate_fn_3_impl(0, 0, 0);
         test_bivariate_fn_3_impl(0, 1, 1);
@@ -692,7 +692,7 @@ pub mod test {
 
     #[test]
     fn test_bivariate_parity_fn_3() {
-        logger::init(LevelFilter::DEBUG);
+        logger::test_init(LevelFilter::DEBUG);
 
         test_bivariate_parity_fn_impl(3, 0b001);
         test_bivariate_parity_fn_impl(3, 0b000);
@@ -702,7 +702,7 @@ pub mod test {
 
     #[test]
     fn test_bivariate_parity_fn_8() {
-        logger::init(LevelFilter::DEBUG);
+        logger::test_init(LevelFilter::DEBUG);
 
         test_bivariate_parity_fn_impl(8, 0b11001001);
         test_bivariate_parity_fn_impl(8, 0b01001001);

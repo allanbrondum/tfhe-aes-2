@@ -1,9 +1,6 @@
 //! Model with each ciphertext representing 1 bit. Build on `tfhe-rs` `shortint` module with WoP-PBS
 
-use crate::aes_128::fhe::data_model::{BitT, Byte};
 use crate::tfhe::{ClientKeyT, ContextT};
-use crate::util;
-use rayon::iter::ParallelIterator;
 
 use std::fmt::{Debug, Formatter};
 use std::ops::{BitXor, BitXorAssign};
@@ -19,46 +16,45 @@ use tfhe::shortint::{
     CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus, ShortintParameterSet,
     WopbsParameters,
 };
-use tracing::{debug, trace};
+use tracing::debug;
 
-// todo generate
 /// Parameters created from
 ///
 /// ```text
-/// ./optimizer  --min-precision 8 --max-precision 8 --p-error 5.42101086e-20 --ciphertext-modulus-log 64 --wop-pbs
+/// ./optimizer  --min-precision 1 --max-precision 1 --p-error 5.42101086e-20 --ciphertext-modulus-log 64 --wop-pbs
 /// security level: 128
 /// target p_error: 5.4e-20
 /// per precision and log norm2:
 ///
-///   - 8: # bits
-///     -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b, cb_l,cb_b, pp_l,pp_b,  cost, p_error
-///     ...
-///     - 7 :   2, 10,  785,    6,  7,     8,  2,     4,  6,     3, 12,  12143, 5.4e-20
-///     ...
+/// - 1: # bits
+/// -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b, cb_l,cb_b, pp_l,pp_b,  cost, p_error
+/// ...
+/// - 7 :   4,  9,  661,    3, 12,     6,  2,     2,  9,     2, 16,    353, 5.3e-20
+/// ...
 /// ```
 fn params() -> ShortintParameterSet {
     let wopbs_params = WopbsParameters {
-        lwe_dimension: LweDimension(785),
-        glwe_dimension: GlweDimension(2),
-        polynomial_size: PolynomialSize(1024),
+        lwe_dimension: LweDimension(661),
+        glwe_dimension: GlweDimension(4),
+        polynomial_size: PolynomialSize(512),
         lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
             1.5140301927925663e-5,
         )),
         glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
             0.00000000000000022148688116005568,
         )),
-        pbs_base_log: DecompositionBaseLog(7),
-        pbs_level: DecompositionLevelCount(6),
-        ks_level: DecompositionLevelCount(8),
+        pbs_level: DecompositionLevelCount(3),
+        pbs_base_log: DecompositionBaseLog(12),
+        ks_level: DecompositionLevelCount(6),
         ks_base_log: DecompositionBaseLog(2),
-        pfks_level: DecompositionLevelCount(3),
-        pfks_base_log: DecompositionBaseLog(12),
+        cbs_level: DecompositionLevelCount(2),
+        cbs_base_log: DecompositionBaseLog(9),
+        pfks_level: DecompositionLevelCount(2),
+        pfks_base_log: DecompositionBaseLog(16),
         pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
             0.00000000000000022148688116005568,
         )),
-        cbs_level: DecompositionLevelCount(4),
-        cbs_base_log: DecompositionBaseLog(6),
-        message_modulus: MessageModulus(256),
+        message_modulus: MessageModulus(2),
         carry_modulus: CarryModulus(1),
         ciphertext_modulus: CiphertextModulus::new_native(),
         encryption_key_choice: EncryptionKeyChoice::Big,
@@ -85,13 +81,13 @@ fn params() -> ShortintParameterSet {
     ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
 }
 
+/// Ciphertext representing a single bit and encrypted for use in circuit bootstrapping
 #[derive(Clone)]
 pub struct BitCt {
     ct: LweCiphertextOwned<u64>,
     noise_level: NoiseLevel,
     pub context: FheContext,
 }
-
 
 impl Debug for BitCt {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -261,19 +257,21 @@ impl FheContext {
     }
 
     /// Functional bootstrap of 8 bit `shortint` from individual bits
-    pub fn bootstrap_from_bits(&self, bits: &[&BitCt], lut: &ShortintWopbsLUT) -> BitCt {
+    pub fn bootstrap_from_bits(
+        &self,
+        bits: &[&BitCt],
+        lut: &ShortintWopbsLUT,
+    ) -> FullWidthCiphertext {
         let start = Instant::now();
         assert_eq!(lut.as_ref().output_ciphertext_count(), CiphertextCount(1));
 
         let lwe_size = bits[0].ct.lwe_size();
 
-        let start = Instant::now();
         let mut bits_data =
             Vec::with_capacity(bits.iter().map(|bit_ct| bit_ct.ct.as_ref().len()).sum());
         for bit_ct in bits {
             bits_data.extend(bit_ct.ct.as_ref());
         }
-        trace!("copy bits data {:?}", start.elapsed());
 
         let bits_list_ct = LweCiphertextListOwned::create_from(
             bits_data,
@@ -292,14 +290,14 @@ impl FheContext {
 
         debug!("circuit bootstrap {:?}", start.elapsed());
 
-        BitCt::new(lwe_ct, self.clone())
+        FullWidthCiphertext::new(lwe_ct, self.clone())
     }
 
-    pub fn extract_bit_from_bit(&self, bit: &BitCt) -> BitCt {
+    pub fn extract_bit_from_bit(&self, ct: &FullWidthCiphertext) -> BitCt {
         let start = Instant::now();
 
         let shortint_ct = shortint::Ciphertext::new(
-            bit.ct.clone(),
+            ct.ct.clone(),
             Degree::new(1),
             NoiseLevel::NOMINAL,
             MessageModulus(2),
@@ -345,11 +343,24 @@ fn generate_multivariate_lut(
     vec_lut
 }
 
+/// Ciphertext representing 1 bit encrypted for bit extraction
+#[derive(Clone)]
+pub struct FullWidthCiphertext {
+    pub ct: LweCiphertextOwned<u64>,
+    pub context: FheContext,
+}
+
+impl FullWidthCiphertext {
+    pub fn new(ct: LweCiphertextOwned<u64>, context: FheContext) -> Self {
+        Self { ct, context }
+    }
+}
+
 #[cfg(test)]
 pub mod test {
     use super::*;
 
-    use crate::logger;
+    use crate::{logger, util};
     use std::sync::{Arc, LazyLock};
     use tracing::level_filters::LevelFilter;
 
@@ -407,7 +418,7 @@ pub mod test {
 
     #[test]
     fn test_bivariate_parity_fn_3() {
-        logger::init(LevelFilter::DEBUG);
+        logger::test_init(LevelFilter::DEBUG);
 
         test_bivariate_parity_fn_impl(3, 0b001);
         test_bivariate_parity_fn_impl(3, 0b000);
@@ -417,7 +428,7 @@ pub mod test {
 
     #[test]
     fn test_bivariate_parity_fn_8() {
-        logger::init(LevelFilter::DEBUG);
+        logger::test_init(LevelFilter::DEBUG);
 
         test_bivariate_parity_fn_impl(8, 0b11001001);
         test_bivariate_parity_fn_impl(8, 0b01001001);

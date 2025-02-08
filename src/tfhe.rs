@@ -2,8 +2,8 @@ use tfhe::core_crypto::entities::Cleartext;
 
 mod engine;
 pub mod shortint_1bit;
-pub mod shortint_woppbs_8bit;
 pub mod shortint_woppbs_1bit;
+pub mod shortint_woppbs_8bit;
 
 pub trait ClientKeyT: Send + Sync {
     type Bit: Send + Sync;

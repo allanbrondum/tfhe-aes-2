@@ -7,10 +7,8 @@ use crate::tfhe::shortint_woppbs_8bit::*;
 use rayon::iter::ParallelIterator;
 
 use std::sync::OnceLock;
-use std::time::Instant;
 
 use tfhe::shortint::wopbs::ShortintWopbsLUT;
-use tracing::debug;
 
 impl ByteT for Byte<BitCt> {
     fn bootstrap_assign(&mut self) {
@@ -35,10 +33,8 @@ impl ByteT for Byte<BitCt> {
 
 impl Byte<BitCt> {
     fn bootstrap_with_lut(&self, context: &FheContext, lut: &ShortintWopbsLUT) -> Self {
-        let int_byte = context.bootstrap_from_bits(&self, lut);
-        let byte = context.extract_bits_from_int_byte(&int_byte);
-
-        byte
+        let int_byte = context.bootstrap_from_bits(self, lut);
+        context.extract_bits_from_ciphertext(&int_byte)
     }
 }
 
@@ -50,19 +46,20 @@ mod test {
 
     #[test]
     fn test_two_rounds() {
-        logger::init(LevelFilter::INFO);
+        logger::test_init(LevelFilter::INFO);
 
         let (client_key, ctx) = crate::tfhe::shortint_woppbs_8bit::test::KEYS.clone();
 
-        test_helper::test_vs_plain(client_key.as_ref(), &ctx, 2);
+        test_helper::test_block_encryption_vs_plain(client_key.as_ref(), &ctx, 2);
     }
 
     #[test]
+    #[cfg(feature = "long_running_tests")]
     fn test_vs_aes() {
-        logger::init(LevelFilter::INFO);
+        logger::test_init(LevelFilter::INFO);
 
         let (client_key, ctx) = crate::tfhe::shortint_woppbs_8bit::test::KEYS.clone();
 
-        test_helper::test_vs_aes(client_key.as_ref(), &ctx);
+        test_helper::test_key_expansion_and_block_encryption_vs_aes(client_key.as_ref(), &ctx);
     }
 }

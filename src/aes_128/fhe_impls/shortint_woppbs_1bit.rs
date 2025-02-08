@@ -22,7 +22,7 @@ impl ByteT for Byte<BitCt> {
         });
 
         self.bits_mut().for_each(|bit| {
-            let new_bit = context.bootstrap_from_bits(&[bit], &lut);
+            let new_bit = context.bootstrap_from_bits(&[bit], lut);
             *bit = context.extract_bit_from_bit(&new_bit);
         });
     }
@@ -44,7 +44,6 @@ impl ByteT for Byte<BitCt> {
             context.extract_bit_from_bit(&new_bit)
         }));
 
-
         Self(new_bits)
     }
 }
@@ -59,19 +58,20 @@ mod test {
 
     #[test]
     fn test_two_rounds() {
-        logger::init(LevelFilter::INFO);
+        logger::test_init(LevelFilter::INFO);
 
         let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS.clone();
 
-        test_helper::test_vs_plain(client_key.as_ref(), &ctx, 2);
+        test_helper::test_block_encryption_vs_plain(client_key.as_ref(), &ctx, 2);
     }
 
     #[test]
+    #[cfg(feature = "long_running_tests")]
     fn test_vs_aes() {
-        logger::init(LevelFilter::INFO);
+        logger::test_init(LevelFilter::INFO);
 
         let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS.clone();
 
-        test_helper::test_vs_aes(client_key.as_ref(), &ctx);
+        test_helper::test_key_expansion_and_block_encryption_vs_aes(client_key.as_ref(), &ctx);
     }
 }

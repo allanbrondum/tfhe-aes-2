@@ -23,3 +23,13 @@ where
 
     stdout_layer.and_then(env_filter)
 }
+
+#[cfg(test)]
+pub fn test_init(default_level: LevelFilter) {
+    use std::sync::OnceLock;
+    static INITIALIZED: OnceLock<()> = OnceLock::new();
+
+    INITIALIZED.get_or_init(|| {
+        init(default_level);
+    });
+}
