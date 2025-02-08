@@ -12,6 +12,7 @@ hex = "0.4.3"
 rayon = "1.10.0"
 tracing = { version = "0.1.40" }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "registry", "fmt", "ansi"] }
+clap = "4.5.28"
 
 [patch.crates-io]
 tfhe = { path = "../tfhe-rs/tfhe" }

@@ -2,6 +2,7 @@
 //! additional primitives for multivariate function bootstrapping
 
 use crate::aes_128::fhe::data_model::{BitT, Byte};
+use crate::tfhe::ClientKeyT;
 use crate::util;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use rayon::iter::{IntoParallelRefIterator, ParallelBridge};
@@ -26,7 +27,7 @@ use tfhe::shortint::{
     CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus, ShortintParameterSet,
     WopbsParameters,
 };
-use tracing::debug;
+use tracing::{debug, trace};
 
 /// Parameters created from
 ///
@@ -227,7 +228,7 @@ impl IntByte {
             .iter()
             .flat_map(|bit_ct| bit_ct.into_container().iter().copied())
             .collect();
-        debug!("copy bits data {:?}", start.elapsed());
+        trace!("copy bits data {:?}", start.elapsed());
 
         let bits_list_ct = LweCiphertextListOwned::create_from(
             bits_data,
@@ -282,7 +283,7 @@ impl Byte<BitCt> {
         let bits = util::collect_array(bit_cts.iter().map(|bit_ct| {
             let start = Instant::now();
             let data = bit_ct.into_container().to_vec();
-            debug!("copy bit data {:?}", start.elapsed());
+            trace!("copy bit data {:?}", start.elapsed());
 
             BitCt::new(
                 LweCiphertextOwned::create_from(
@@ -307,8 +308,8 @@ pub struct FheContext {
 
 pub struct ClientKey(shortint::ClientKey, FheContext);
 
-impl ClientKey {
-    pub fn encrypt(&self, bit: Cleartext<u64>) -> BitCt {
+impl ClientKeyT<BitCt> for ClientKey {
+    fn encrypt(&self, bit: Cleartext<u64>) -> BitCt {
         let (encryption_lwe_sk, encryption_noise_distribution) = (
             &self.0.lwe_secret_key,
             self.0.parameters.lwe_noise_distribution(),
@@ -327,7 +328,7 @@ impl ClientKey {
         BitCt::new(ct, self.1.clone())
     }
 
-    pub fn decrypt(&self, bit: &BitCt) -> Cleartext<u64> {
+    fn decrypt(&self, bit: &BitCt) -> Cleartext<u64> {
         let encoding = lwe_encryption::decrypt_lwe_ciphertext(&self.0.lwe_secret_key, &bit.ct);
         decode_bit(encoding)
     }
@@ -362,7 +363,7 @@ impl FheContext {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::aes_128::fhe_impls::shortint_woppbs_8bit::{fhe_decrypt_byte, fhe_encrypt_byte};
+
     use std::sync::{Arc, LazyLock};
     use std::time::Instant;
     use tfhe::core_crypto::prelude::*;
@@ -371,6 +372,7 @@ mod test {
         CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus, ShortintParameterSet,
         WopbsParameters,
     };
+    use crate::aes_128::fhe_encryption::{fhe_decrypt_byte, fhe_encrypt_byte};
 
     static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(|| keys_impl());
 
@@ -430,7 +432,7 @@ mod test {
         let (client_key, context) = KEYS.clone();
 
         let byte = 0b10110101;
-        let byte_fhe = fhe_encrypt_byte(&client_key, byte);
+        let byte_fhe = fhe_encrypt_byte(client_key.as_ref(), byte);
 
         let lut = IntByte::generate_lookup_table(&context, |val| val);
         let int_byte_fhe = IntByte::bootstrap_from_bits(&byte_fhe, &lut);
@@ -444,10 +446,10 @@ mod test {
         let (client_key, context) = KEYS.clone();
 
         let byte = 0b10110101;
-        let byte_fhe = fhe_encrypt_byte(&client_key, byte);
+        let byte_fhe = fhe_encrypt_byte(client_key.as_ref(), byte);
 
         let byte2 = 0b01100110;
-        let byte_fhe2 = fhe_encrypt_byte(&client_key, byte2);
+        let byte_fhe2 = fhe_encrypt_byte(client_key.as_ref(), byte2);
 
         let byte_fhe = byte_fhe ^ byte_fhe2.clone();
 
@@ -455,7 +457,7 @@ mod test {
         let int_byte_fhe = IntByte::bootstrap_from_bits(&byte_fhe, &lut);
 
         let decrypted_int_byte = client_key.0.decrypt_without_padding(&int_byte_fhe.ct) as u8;
-        let decrypted_bits_byte = fhe_decrypt_byte(&client_key, &byte_fhe);
+        let decrypted_bits_byte = fhe_decrypt_byte(client_key.as_ref(), &byte_fhe);
         assert_eq!(decrypted_int_byte, decrypted_bits_byte);
     }
 
@@ -464,7 +466,7 @@ mod test {
         let (client_key, context) = KEYS.clone();
 
         let byte = 0b10110101;
-        let byte_fhe = fhe_encrypt_byte(&client_key, byte);
+        let byte_fhe = fhe_encrypt_byte(client_key.as_ref(), byte);
 
         let lut = IntByte::generate_lookup_table(&context, |val| val + 3);
         let int_byte_fhe = IntByte::bootstrap_from_bits(&byte_fhe, &lut);
@@ -480,7 +482,7 @@ mod test {
         let int_byte_fhe = IntByte::new(client_key.0.encrypt_without_padding(0b10110101), context);
         let bool_byte_fhe = Byte::extract_bits_from_int_byte(&int_byte_fhe);
 
-        let bool_byte = fhe_decrypt_byte(&client_key, &bool_byte_fhe);
+        let bool_byte = fhe_decrypt_byte(client_key.as_ref(), &bool_byte_fhe);
         assert_eq!(u8::from(bool_byte), 0b10110101);
     }
 

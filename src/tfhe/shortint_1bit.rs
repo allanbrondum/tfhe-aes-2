@@ -21,6 +21,7 @@ use tfhe::shortint::engine::ShortintEngine;
 use tfhe::shortint::server_key::ShortintBootstrappingKey;
 use tfhe::shortint::{CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus};
 use tracing::debug;
+use crate::tfhe::ClientKeyT;
 
 const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
     lwe_dimension: LweDimension(692),
@@ -81,13 +82,13 @@ pub struct FheContext {
 
 pub struct ClientKey(shortint::ClientKey, FheContext);
 
-impl ClientKey {
-    pub fn encrypt(&self, bit: Cleartext<u64>) -> BitCt {
+impl ClientKeyT<BitCt> for ClientKey {
+    fn encrypt(&self, bit: Cleartext<u64>) -> BitCt {
         let ct = self.0.encrypt(bit.0);
         BitCt::new(ct, self.1.clone())
     }
 
-    pub fn decrypt(&self, bit: &BitCt) -> Cleartext<u64> {
+    fn decrypt(&self, bit: &BitCt) -> Cleartext<u64> {
         Cleartext(self.0.decrypt(&bit.ct))
     }
 }

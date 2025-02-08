@@ -1,10 +1,22 @@
-/// Model and logic for AES-128 encryption executed in an FHE context
+use crate::aes_128::fhe::data_model::{Byte, Word};
+use crate::tfhe::ClientKeyT;
+use crate::util;
+use rayon::iter::IntoParallelRefIterator;
+use tfhe::core_crypto::entities::Cleartext;
+
+/// Data model and logic for AES-128 encryption executed in an FHE context
 pub mod fhe;
+/// FHE AES-128 implementations
 pub mod fhe_impls;
 /// Plain AES-128 implementation used for testing reference (e.g. running less than 10 rounds)
 pub mod plain;
+/// Utilities to encrypt clear data (e.g. keys and blocks) into FHE
+pub mod fhe_encryption;
+//! Call `aes` crate
+pub mod aes_lib;
 #[cfg(test)]
 mod test_helper;
+
 
 pub type Block = [u8; 16];
 pub type Key = [u8; 16];

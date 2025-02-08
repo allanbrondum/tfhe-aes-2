@@ -4,21 +4,21 @@ use rayon::iter::ParallelIterator;
 use std::fmt::Debug;
 use std::mem;
 
-pub fn par_collect_array<const N: usize, T: Send + Sync + Debug>(
+pub fn par_collect_array<const N: usize, T: Send + Sync>(
     iter: impl IntoParallelIterator<Item = T>,
 ) -> [T; N] {
     iter.into_par_iter()
         .collect::<Vec<_>>()
-        .try_into()
+        .try_into().map_err(|_|())
         .expect("array length")
 }
 
-pub fn collect_array<const N: usize, T: Send + Sync + Debug>(
+pub fn collect_array<const N: usize, T: Send + Sync>(
     iter: impl IntoIterator<Item = T>,
 ) -> [T; N] {
     iter.into_iter()
         .collect::<Vec<_>>()
-        .try_into()
+        .try_into().map_err(|_|())
         .expect("array length")
 }
 

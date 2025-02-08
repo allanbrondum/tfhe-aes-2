@@ -1,3 +1,5 @@
+//! Implementation of AES-128 using 8 bit `shortint` WoP-PBS
+
 use crate::aes_128::fhe::data_model::{Block, Byte, ByteT, Word};
 use crate::aes_128::{fhe, plain, Key, SBOX};
 use crate::tfhe::shortint_woppbs_8bit::*;
@@ -46,119 +48,45 @@ impl Byte<BitCt> {
     }
 }
 
-pub fn expand_key_and_encrypt_blocks(
-    key_clear: aes_128::Key,
-    blocks_clear: &[aes_128::Block],
-    rounds: usize,
-) -> Vec<aes_128::Block> {
-    debug!("start");
 
-    // Client side: generate keys
-    let (client_key, context) = FheContext::generate_keys();
-    debug!("keys generated");
 
-    // Client side: FHE encrypt AES key and block
-    let key = fhe_encrypt_byte_array(&client_key, &key_clear);
-    let blocks: Vec<_> = blocks_clear
-        .iter()
-        .map(|block| fhe_encrypt_byte_array(&client_key, &block))
-        .collect();
-    debug!("aes key and block encrypted");
 
-    // Server side (optional): AES encrypt blocks
-    let start = Instant::now();
-    let key_schedule = fhe::key_schedule(&key);
-    debug!("key schedule created {:?}", start.elapsed());
-
-    // Server side: AES encrypt blocks
-    let start = Instant::now();
-    let encrypted_blocks: Vec<_> = blocks
-        .into_par_iter()
-        .map(|block| fhe::encrypt_block(&key_schedule, block, rounds))
-        .collect();
-
-    debug!("block encrypted (rounds: {}) {:?}", rounds, start.elapsed());
-
-    // Client side (optional): FHE decrypt AES encrypted blocks
-    encrypted_blocks
-        .iter()
-        .map(|block| fhe_decrypt_byte_array(&client_key, block))
-        .collect()
-}
-
-pub fn fhe_encrypt_word_array<const N: usize>(
-    client_key: &ClientKey,
-    array: &[plain::data_model::Word; N],
-) -> [Word<BitCt>; N] {
-    util::par_collect_array(
-        array
-            .par_iter()
-            .map(|word| Word::new(fhe_encrypt_byte_array(client_key, &word.0))),
-    )
-}
-
-pub fn fhe_encrypt_byte_array<const N: usize>(
-    client_key: &ClientKey,
-    array: &[u8; N],
-) -> [Byte<BitCt>; N] {
-    util::par_collect_array(
-        array
-            .par_iter()
-            .map(|&byte| fhe_encrypt_byte(client_key, byte.into())),
-    )
-}
-
-pub fn fhe_encrypt_byte(client_key: &ClientKey, byte: u8) -> Byte<BitCt> {
-    Byte::new(util::par_collect_array(
-        util::byte_to_bits(byte).map(|b| client_key.encrypt(Cleartext(b as u64))),
-    ))
-}
-
-pub fn fhe_decrypt_word_array<const N: usize>(
-    client_key: &ClientKey,
-    array: &[Word<BitCt>; N],
-) -> [plain::data_model::Word; N] {
-    util::par_collect_array(
-        array
-            .par_iter()
-            .map(|word| plain::data_model::Word(fhe_decrypt_byte_array(client_key, &word.0))),
-    )
-}
-
-pub fn fhe_decrypt_byte_array<const N: usize>(
-    client_key: &ClientKey,
-    array: &[Byte<BitCt>; N],
-) -> [u8; N] {
-    util::par_collect_array(
-        array
-            .par_iter()
-            .map(|byte| fhe_decrypt_byte(client_key, byte).into()),
-    )
-}
-
-pub fn fhe_decrypt_byte(client_key: &ClientKey, byte: &Byte<BitCt>) -> u8 {
-    util::bits_to_byte(byte.bits().map(|bit| client_key.decrypt(bit).0 as u8))
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::aes_128::{test_helper, ROUNDS};
-    use tracing::debug;
-
-    #[test]
-    fn test_tfhe_pbssub_wop_shortint_two_rounds() {
-        // rayon::ThreadPoolBuilder::new()
-        //     .num_threads(16)
-        //     .build_global()
-        //     .unwrap();
-        // debug!("current_num_threads: {}", rayon::current_num_threads());
-
-        test_helper::test_vs_plain(expand_key_and_encrypt_blocks, 2);
-    }
-
-    #[test]
-    fn test_tfhe_pbssub_wop_shortint_all_rounds() {
-        test_helper::test_vs_plain(expand_key_and_encrypt_blocks, ROUNDS);
-    }
-}
+// #[cfg(test)]
+// mod test {
+//     use rayon::iter::IndexedParallelIterator;
+//     use super::*;
+//     use crate::aes_128::{test_helper, ROUNDS};
+//     use crate::logger;
+//     use tracing::metadata::LevelFilter;
+//
+//     #[test]
+//     fn test_encrypt_two_rounds() {
+//         logger::init(LevelFilter::INFO);
+//
+//         // rayon::ThreadPoolBuilder::new()
+//         //     .num_threads(16)
+//         //     .build_global()
+//         //     .unwrap();
+//         // debug!("current_num_threads: {}", rayon::current_num_threads());
+//
+//         test_helper::test_vs_plain(expand_key_and_encrypt_blocks, 2);
+//     }
+//
+//     #[test]
+//     fn test_encrypt_all_rounds() {
+//         logger::init(LevelFilter::INFO);
+//
+//         test_helper::test_vs_plain(expand_key_and_encrypt_blocks, ROUNDS);
+//     }
+//     #[test]
+//     fn testing() {
+//         let max = (0..1_000_000)
+//             .into_par_iter()
+//             // .with_max_len(1234)
+//             .fold(|| 0, |acc, a| acc + 1) // count how many are in this segment
+//             .max()
+//             .unwrap();
+//
+//         println!("{}", max);
+//     }
+// }

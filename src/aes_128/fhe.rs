@@ -4,7 +4,7 @@
 pub mod data_model;
 
 use crate::aes_128::fhe::data_model::{BitT, Block, Byte, ByteT, State, Word};
-use crate::aes_128::RC;
+use crate::aes_128::{RC, ROUNDS};
 use crate::util;
 use rayon::iter::IndexedParallelIterator;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelBridge};
@@ -85,7 +85,18 @@ fn mix_columns<Bit: BitT>(state: &mut State<Bit>) {
 }
 
 pub fn encrypt_block<Bit: BitT>(
-    expanded_key_fhe: &[Word<Bit>; 44],
+    expanded_key: &[Word<Bit>; 44],
+    block: Block<Bit>,
+    rounds: usize,
+) -> Block<Bit>
+where
+    Byte<Bit>: ByteT,
+{
+    encrypt_block(expanded_key, block, ROUNDS)
+}
+
+pub fn encrypt_block_for_rounds<Bit: BitT>(
+    expanded_key: &[Word<Bit>; 44],
     block: Block<Bit>,
     rounds: usize,
 ) -> Block<Bit>
@@ -96,7 +107,7 @@ where
 
     xor_state(
         &mut state_fhe,
-        expanded_key_fhe[0..4].try_into().expect("array length 4"),
+        expanded_key[0..4].try_into().expect("array length 4"),
     );
 
     for i in 1..rounds {
@@ -110,7 +121,7 @@ where
         debug!("xor_state");
         xor_state(
             &mut state_fhe,
-            expanded_key_fhe[i * 4..(i + 1) * 4]
+            expanded_key[i * 4..(i + 1) * 4]
                 .try_into()
                 .expect("array length 4"),
         );
@@ -124,7 +135,7 @@ where
     debug!("xor_state");
     xor_state(
         &mut state_fhe,
-        expanded_key_fhe[40..44].try_into().expect("array length 4"),
+        expanded_key[40..44].try_into().expect("array length 4"),
     );
 
     state_fhe.into_array()

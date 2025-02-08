@@ -1,19 +1,9 @@
-use crate::aes_128::{plain, Block, Key, ROUNDS};
+use crate::aes_128::{aes_lib, plain, Block, Key, ROUNDS};
 use aes::cipher::{BlockEncrypt, KeyInit};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
-fn encrypt_aes_lib(key: Key, blocks: &[Block]) -> Vec<Block> {
-    let aes = aes::Aes128::new_from_slice(&key).unwrap();
-    blocks
-        .iter()
-        .map(|block| {
-            let mut block = (*block).into();
-            aes.encrypt_block(&mut block);
-            block.into()
-        })
-        .collect()
-}
+
 
 pub fn test_vs_aes(encrypt_fn: fn(key: Key, blocks: &[Block], rounds: usize) -> Vec<Block>) {
     let seed: [u8; 32] = Default::default();
@@ -28,7 +18,7 @@ pub fn test_vs_aes(encrypt_fn: fn(key: Key, blocks: &[Block], rounds: usize) -> 
 
     let encrypted = (encrypt_fn)(key, blocks, ROUNDS);
 
-    assert_eq!(encrypted, encrypt_aes_lib(key, blocks));
+    assert_eq!(encrypted, aes_lib::encrypt_blocks(key, blocks));
 }
 
 pub fn test_vs_plain(
