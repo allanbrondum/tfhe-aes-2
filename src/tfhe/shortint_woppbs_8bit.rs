@@ -13,8 +13,8 @@ use std::time::Instant;
 use tfhe::core_crypto::prelude::*;
 use tfhe::shortint;
 use tfhe::shortint::ciphertext::{Degree, NoiseLevel};
-use tfhe::shortint::engine::ShortintEngine;
 
+use crate::tfhe::engine::ShortintEngine;
 use tfhe::shortint::wopbs::{ShortintWopbsLUT, WopbsKey};
 use tfhe::shortint::{
     CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus, ShortintParameterSet,
@@ -193,15 +193,21 @@ impl ContextT for FheContext {
     }
 }
 
-pub struct ClientKey(shortint::ClientKey, FheContext);
+pub struct ClientKey {
+    #[allow(unused)]
+    glwe_secret_key: GlweSecretKeyOwned<u64>,
+    lwe_secret_key: LweSecretKeyOwned<u64>,
+    shortint_client_key: shortint::ClientKey,
+    context: FheContext,
+}
 
 impl ClientKeyT for ClientKey {
     type Bit = BitCt;
 
     fn encrypt(&self, bit: Cleartext<u64>) -> BitCt {
         let (encryption_lwe_sk, encryption_noise_distribution) = (
-            &self.0.lwe_secret_key,
-            self.0.parameters.lwe_noise_distribution(),
+            &self.lwe_secret_key,
+            self.shortint_client_key.parameters.lwe_noise_distribution(),
         );
 
         let ct = ShortintEngine::with_thread_local_mut(|engine| {
@@ -209,16 +215,16 @@ impl ClientKeyT for ClientKey {
                 encryption_lwe_sk,
                 encode_bit(bit),
                 encryption_noise_distribution,
-                self.0.parameters.ciphertext_modulus(),
+                self.shortint_client_key.parameters.ciphertext_modulus(),
                 &mut engine.encryption_generator,
             )
         });
 
-        BitCt::new(ct, self.1.clone())
+        BitCt::new(ct, self.context.clone())
     }
 
     fn decrypt(&self, bit: &BitCt) -> Cleartext<u64> {
-        let encoding = lwe_encryption::decrypt_lwe_ciphertext(&self.0.lwe_secret_key, &bit.ct);
+        let encoding = lwe_encryption::decrypt_lwe_ciphertext(&self.lwe_secret_key, &bit.ct);
         decode_bit(encoding)
     }
 }
@@ -229,16 +235,26 @@ impl FheContext {
     }
 
     fn generate_keys_with_params(params: ShortintParameterSet) -> (ClientKey, Self) {
-        let (client_key, server_key) = shortint::gen_keys(params);
+        let (shortint_client_key, server_key) = shortint::gen_keys(params);
 
-        let wops_key = WopbsKey::new_wopbs_key_only_for_wopbs(&client_key, &server_key);
+        let wops_key = WopbsKey::new_wopbs_key_only_for_wopbs(&shortint_client_key, &server_key);
 
         let context = FheContext {
             server_key: server_key.into(),
             wopbs_key: wops_key.into(),
         };
 
-        (ClientKey(client_key, context.clone()), context)
+        let (glwe_secret_key, lwe_secret_key, _parameters) =
+            shortint_client_key.clone().into_raw_parts();
+
+        let client_key = ClientKey {
+            glwe_secret_key,
+            lwe_secret_key,
+            shortint_client_key,
+            context: context.clone(),
+        };
+
+        (client_key, context)
     }
 
     pub fn generate_lookup_table(&self, f: impl Fn(u64) -> u64) -> ShortintWopbsLUT {
@@ -281,9 +297,9 @@ impl FheContext {
         let bit_cts: Vec<_> = byte.bits().map(|bit| bit.ct.as_view()).collect();
         let start = Instant::now();
         let mut bits_data =
-            Vec::with_capacity(bit_cts.iter().map(|bit_ct| bit_ct.data.len()).sum());
+            Vec::with_capacity(bit_cts.iter().map(|bit_ct| bit_ct.as_ref().len()).sum());
         for bit_ct in bit_cts {
-            bits_data.extend(bit_ct.data);
+            bits_data.extend(bit_ct.as_ref());
         }
         trace!("copy bits data {:?}", start.elapsed());
 
@@ -386,7 +402,9 @@ pub mod test {
         let lut = context.generate_lookup_table(|val| val);
         let int_byte_fhe = context.bootstrap_from_bits(&byte_fhe, &lut);
 
-        let decrypted = client_key.0.decrypt_without_padding(&int_byte_fhe.ct);
+        let decrypted = client_key
+            .shortint_client_key
+            .decrypt_without_padding(&int_byte_fhe.ct);
         assert_eq!(decrypted, 0b10110101);
     }
 
@@ -405,7 +423,9 @@ pub mod test {
         let lut = context.generate_lookup_table(|val| val);
         let int_byte_fhe = context.bootstrap_from_bits(&byte_fhe, &lut);
 
-        let decrypted_int_byte = client_key.0.decrypt_without_padding(&int_byte_fhe.ct) as u8;
+        let decrypted_int_byte = client_key
+            .shortint_client_key
+            .decrypt_without_padding(&int_byte_fhe.ct) as u8;
         let decrypted_bits_byte = decrypt_byte(client_key.as_ref(), &byte_fhe);
         assert_eq!(decrypted_int_byte, decrypted_bits_byte);
     }
@@ -420,7 +440,9 @@ pub mod test {
         let lut = context.generate_lookup_table(|val| val + 3);
         let int_byte_fhe = context.bootstrap_from_bits(&byte_fhe, &lut);
 
-        let decrypted = client_key.0.decrypt_without_padding(&int_byte_fhe.ct);
+        let decrypted = client_key
+            .shortint_client_key
+            .decrypt_without_padding(&int_byte_fhe.ct);
         assert_eq!(decrypted, 0b10110101 + 3);
     }
 
@@ -429,7 +451,9 @@ pub mod test {
         let (client_key, context) = KEYS.clone();
 
         let int_byte_fhe = IntByte::new(
-            client_key.0.encrypt_without_padding(0b10110101),
+            client_key
+                .shortint_client_key
+                .encrypt_without_padding(0b10110101),
             context.clone(),
         );
         let byte_fhe = context.extract_bits_from_int_byte(&int_byte_fhe);
@@ -437,60 +461,4 @@ pub mod test {
         let byte = decrypt_byte(client_key.as_ref(), &byte_fhe);
         assert_eq!(byte, 0b10110101);
     }
-
-    // #[test]
-    // fn test_pbssub_wob_shortint_perf() {
-    //     let start = Instant::now();
-    //     let (client_key, context) = KEYS.clone();
-    //     debug!("keys generated: {:?}", start.elapsed());
-    //
-    //     let start = Instant::now();
-    //     let mut b1 = client_key.encrypt_without_padding(1);
-    //     let b2 = client_key.encrypt_without_padding(3);
-    //     debug!(
-    //         "data encrypted: {:?}, dim: {}",
-    //         start.elapsed(),
-    //         b2.ct.data.len()
-    //     );
-    //
-    //     let start = Instant::now();
-    //     context.server_key.unchecked_add_assign(&mut b1, &b2);
-    //     debug!("add elapsed: {:?}", start.elapsed());
-    //
-    //     let lut = context
-    //         .wopbs_key
-    //         .generate_lut_without_padding(&b1, |a| a)
-    //         .into();
-    //     let start = Instant::now();
-    //     _ = context
-    //         .wopbs_key
-    //         .programmable_bootstrapping_without_padding(&b1, &lut);
-    //     debug!("bootstrap elapsed: {:?}", start.elapsed());
-    // }
-    //
-
-    // #[test]
-    // fn test_extract_bits() {
-    //     let start = Instant::now();
-    //     let (client_key, context) = KEYS.clone();
-    //     debug!("keys generated: {:?}", start.elapsed());
-    //
-    //     let cte1 = client_key.encrypt_without_padding(0b0110100);
-    //
-    //     let start = Instant::now();
-    //     let delta = (1u64 << (64 - 8));
-    //     let delta_log = DeltaLog(delta.ilog2() as usize);
-    //     let bit_cts = context
-    //         .wopbs_key
-    //         .extract_bits(delta_log, &cte1, ExtractedBitsCount(8));
-    //     debug!("bootstrap elapsed: {:?}", start.elapsed());
-    //
-    //     // let lwe_decryption_key = client_key.glwe_secret_key.as_lwe_secret_key();
-    //     let lwe_decryption_key = &client_key.lwe_secret_key;
-    //     for (i, bit_ct) in bit_cts.iter().enumerate() {
-    //         let decrypted = lwe_encryption::decrypt_lwe_ciphertext(&lwe_decryption_key, &bit_ct);
-    //         let decoded = decrypted.0 >> (64 - 8);
-    //         debug!("bit {}: {:b}", i, decoded);
-    //     }
-    // }
 }

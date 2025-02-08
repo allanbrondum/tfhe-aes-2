@@ -5,7 +5,8 @@ use crate::tfhe::{ClientKeyT, ContextT};
 use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::fmt::{Debug, Formatter};
-use std::iter;
+
+use crate::tfhe::engine::ShortintEngine;
 use std::ops::{BitXor, BitXorAssign};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
@@ -18,7 +19,6 @@ use tfhe::core_crypto::entities::{
 use tfhe::core_crypto::prelude::*;
 use tfhe::shortint;
 use tfhe::shortint::ciphertext::NoiseLevel;
-use tfhe::shortint::engine::ShortintEngine;
 use tfhe::shortint::server_key::ShortintBootstrappingKey;
 use tfhe::shortint::{CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus};
 use tracing::debug;
@@ -38,30 +38,8 @@ use tracing::debug;
 ///     ...
 /// ```
 
-// const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
-//     lwe_dimension: LweDimension(684),
-//     glwe_dimension: GlweDimension(4),
-//     polynomial_size: PolynomialSize(512),
-//     lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-//         4.7280002450549286e-05,
-//     )),
-//     glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-//         2.845267479601915e-15,
-//     )),
-//     pbs_base_log: DecompositionBaseLog(23),
-//     pbs_level: DecompositionLevelCount(1),
-//     ks_base_log: DecompositionBaseLog(4),
-//     ks_level: DecompositionLevelCount(3),
-//     message_modulus: MessageModulus(2),
-//     carry_modulus: CarryModulus(1),
-//     max_noise_level: MaxNoiseLevel::new(11),
-//     log2_p_fail: -64.074,
-//     ciphertext_modulus: CiphertextModulus::new_native(),
-//     encryption_key_choice: EncryptionKeyChoice::Small,
-// };
-
 const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
-    lwe_dimension: LweDimension(640),
+    lwe_dimension: LweDimension(684),
     glwe_dimension: GlweDimension(4),
     polynomial_size: PolynomialSize(512),
     lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
@@ -70,13 +48,13 @@ const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
     glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
         2.845267479601915e-15,
     )),
-    pbs_base_log: DecompositionBaseLog(6),
-    pbs_level: DecompositionLevelCount(7),
-    ks_base_log: DecompositionBaseLog(2),
-    ks_level: DecompositionLevelCount(6),
+    pbs_base_log: DecompositionBaseLog(23),
+    pbs_level: DecompositionLevelCount(1),
+    ks_base_log: DecompositionBaseLog(4),
+    ks_level: DecompositionLevelCount(3),
     message_modulus: MessageModulus(2),
     carry_modulus: CarryModulus(1),
-    max_noise_level: MaxNoiseLevel::new(100),
+    max_noise_level: MaxNoiseLevel::new(11),
     log2_p_fail: -64.074,
     ciphertext_modulus: CiphertextModulus::new_native(),
     encryption_key_choice: EncryptionKeyChoice::Small,
@@ -135,18 +113,25 @@ impl ContextT for FheContext {
     }
 }
 
-pub struct ClientKey(shortint::ClientKey, FheContext);
+pub struct ClientKey {
+    #[allow(unused)]
+    glwe_secret_key: GlweSecretKeyOwned<u64>,
+    #[allow(unused)]
+    lwe_secret_key: LweSecretKeyOwned<u64>,
+    shortint_client_key: shortint::ClientKey,
+    context: FheContext,
+}
 
 impl ClientKeyT for ClientKey {
     type Bit = BitCt;
 
     fn encrypt(&self, bit: Cleartext<u64>) -> BitCt {
-        let ct = self.0.encrypt(bit.0);
-        BitCt::new(ct, self.1.clone())
+        let ct = self.shortint_client_key.encrypt(bit.0);
+        BitCt::new(ct, self.context.clone())
     }
 
     fn decrypt(&self, bit: &BitCt) -> Cleartext<u64> {
-        Cleartext(self.0.decrypt(&bit.ct))
+        Cleartext(self.shortint_client_key.decrypt(&bit.ct))
     }
 }
 
@@ -156,12 +141,15 @@ impl FheContext {
     }
 
     fn generate_keys_with_params(params: ClassicPBSParameters) -> (ClientKey, Self) {
-        let (client_key, server_key) = shortint::gen_keys(params);
+        let (shortint_client_key, server_key) = shortint::gen_keys(params);
+
+        let (glwe_secret_key, lwe_secret_key, _parameters) =
+            shortint_client_key.clone().into_raw_parts();
 
         let packing_keyswitch_key = ShortintEngine::with_thread_local_mut(|engine| {
             lwe_packing_keyswitch_key_generation::allocate_and_generate_new_lwe_packing_keyswitch_key(
-                &client_key.lwe_secret_key,
-                &client_key.glwe_secret_key,
+                &lwe_secret_key,
+                &glwe_secret_key,
                 params.ks_base_log,
                 params.ks_level,
                 params.lwe_noise_distribution,
@@ -175,7 +163,14 @@ impl FheContext {
             packing_keyswitch_key: packing_keyswitch_key.into(),
         };
 
-        (ClientKey(client_key, context.clone()), context)
+        let client_key = ClientKey {
+            glwe_secret_key,
+            lwe_secret_key,
+            shortint_client_key,
+            context: context.clone(),
+        };
+
+        (client_key, context)
     }
 
     /// Create test vector from a cleartext function. The returned test vector can be used
@@ -330,6 +325,7 @@ fn encode_bit(clear: Cleartext<u64>) -> Plaintext<u64> {
     Plaintext(clear.0 << 62)
 }
 
+#[cfg(test)]
 fn decode_bit(plain: Plaintext<u64>) -> Cleartext<u64> {
     let decomposer = SignedDecomposer::new(DecompositionBaseLog(2), DecompositionLevelCount(1));
     // 0/1 bit is represented at next highest bit
@@ -540,7 +536,8 @@ fn apply_selectors_rec(
             .map(|mut tv| {
                 // todo
                 static IDENTITY_LUT: OnceLock<TestVector> = OnceLock::new();
-                let lut = IDENTITY_LUT.get_or_init(|| context.test_vector_from_cleartext_fn(|byte| byte));
+                let lut =
+                    IDENTITY_LUT.get_or_init(|| context.test_vector_from_cleartext_fn(|byte| byte));
                 context.bootstrap_assign(&mut tv[0], &lut);
                 context.bootstrap_assign(&mut tv[1], &lut);
                 context.test_vector_from_ciphertexts(&tv[0], &tv[1])
@@ -581,7 +578,7 @@ pub mod test {
         let packed = context.packing_keyswitch(&[&ct0, &ct1]);
         let mut packed_plain = PlaintextList::new(0, PlaintextCount(packed.polynomial_size().0));
         glwe_encryption::decrypt_glwe_ciphertext(
-            &client_key.0.glwe_secret_key,
+            &client_key.glwe_secret_key,
             &packed,
             &mut packed_plain,
         );

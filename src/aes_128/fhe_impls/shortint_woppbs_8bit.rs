@@ -9,7 +9,6 @@ use rayon::iter::ParallelIterator;
 use std::sync::OnceLock;
 use std::time::Instant;
 
-use crate::tfhe::ContextT;
 use tfhe::shortint::wopbs::ShortintWopbsLUT;
 use tracing::debug;
 
@@ -57,7 +56,6 @@ mod test {
     #[test]
     fn test_two_rounds() {
         logger::init(LevelFilter::INFO);
-
 
         let (client_key, ctx) = crate::tfhe::shortint_woppbs_8bit::test::KEYS.clone();
 

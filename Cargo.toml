@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tfhe = { version = "0.11.0", features = ["boolean", "shortint", "integer", "noise-asserts", "experimental", "nightly-avx512"] }
+tfhe = { version = "0.11.2", features = ["boolean", "shortint", "integer", "noise-asserts", "experimental", "nightly-avx512"] }
 rand = "0.9.0"
 rand_chacha = "0.9.0"
 aes = "0.8.4"
@@ -15,6 +15,3 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter", "registry",
 clap = { version = "4.5.28", features = ["derive"] }
 anyhow = "1.0.95"
 
-# todo
-[patch.crates-io]
-tfhe = { path = "../tfhe-rs/tfhe" }
