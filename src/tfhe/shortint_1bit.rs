@@ -38,8 +38,30 @@ use tracing::debug;
 ///     ...
 /// ```
 
+// const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
+//     lwe_dimension: LweDimension(684),
+//     glwe_dimension: GlweDimension(4),
+//     polynomial_size: PolynomialSize(512),
+//     lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+//         4.7280002450549286e-05,
+//     )),
+//     glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+//         2.845267479601915e-15,
+//     )),
+//     pbs_base_log: DecompositionBaseLog(23),
+//     pbs_level: DecompositionLevelCount(1),
+//     ks_base_log: DecompositionBaseLog(4),
+//     ks_level: DecompositionLevelCount(3),
+//     message_modulus: MessageModulus(2),
+//     carry_modulus: CarryModulus(1),
+//     max_noise_level: MaxNoiseLevel::new(11),
+//     log2_p_fail: -64.074,
+//     ciphertext_modulus: CiphertextModulus::new_native(),
+//     encryption_key_choice: EncryptionKeyChoice::Small,
+// };
+
 const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
-    lwe_dimension: LweDimension(684),
+    lwe_dimension: LweDimension(640),
     glwe_dimension: GlweDimension(4),
     polynomial_size: PolynomialSize(512),
     lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
@@ -48,10 +70,10 @@ const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
     glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
         2.845267479601915e-15,
     )),
-    pbs_base_log: DecompositionBaseLog(23),
-    pbs_level: DecompositionLevelCount(1),
-    ks_base_log: DecompositionBaseLog(4),
-    ks_level: DecompositionLevelCount(3),
+    pbs_base_log: DecompositionBaseLog(6),
+    pbs_level: DecompositionLevelCount(7),
+    ks_base_log: DecompositionBaseLog(6),
+    ks_level: DecompositionLevelCount(2),
     message_modulus: MessageModulus(2),
     carry_modulus: CarryModulus(1),
     max_noise_level: MaxNoiseLevel::new(11),
@@ -59,6 +81,8 @@ const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
     ciphertext_modulus: CiphertextModulus::new_native(),
     encryption_key_choice: EncryptionKeyChoice::Small,
 };
+
+//25:   4,  9,  640,    7,  6,     6,  2,    202, 5.3e-20
 
 #[derive(Clone)]
 pub struct BitCt {
@@ -194,7 +218,6 @@ impl FheContext {
     /// when bootstrapping another ciphertext.
     pub fn test_vector_from_ciphertexts(&self, bit0: &BitCt, bit1: &BitCt) -> TestVector {
         let start = Instant::now();
-        // todo optimize encryption
 
         let res = TestVector(test_vector_from_ciphertexts(
             &self.packing_keyswitch_key.as_view(),
@@ -534,12 +557,12 @@ fn apply_selectors_rec(
             .map(|tv| context.bootstrap(selector, tv))
             .chunks(2)
             .map(|mut tv| {
-                // todo
-                static IDENTITY_LUT: OnceLock<TestVector> = OnceLock::new();
-                let lut =
-                    IDENTITY_LUT.get_or_init(|| context.test_vector_from_cleartext_fn(|byte| byte));
-                context.bootstrap_assign(&mut tv[0], &lut);
-                context.bootstrap_assign(&mut tv[1], &lut);
+                // // todo
+                // static IDENTITY_LUT: OnceLock<TestVector> = OnceLock::new();
+                // let lut =
+                //     IDENTITY_LUT.get_or_init(|| context.test_vector_from_cleartext_fn(|byte| byte));
+                // context.bootstrap_assign(&mut tv[0], &lut);
+                // context.bootstrap_assign(&mut tv[1], &lut);
                 context.test_vector_from_ciphertexts(&tv[0], &tv[1])
             })
             .collect();
@@ -555,7 +578,7 @@ fn apply_selectors_rec(
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use crate::logger;
+    use crate::{logger, util};
     use std::sync::LazyLock;
     use tracing::metadata::LevelFilter;
 
@@ -671,6 +694,37 @@ pub mod test {
         assert_eq!(
             client_key.decrypt(&d),
             f(((m0_clear as u8) << 2) + ((m1_clear as u8) << 1) + m2_clear as u8)
+        );
+    }
+
+    #[test]
+    fn test_bivariate_parity_fn_3() {
+        logger::init(LevelFilter::DEBUG);
+
+        test_bivariate_parity_fn_impl(2, 0b001);
+        test_bivariate_parity_fn_impl(2, 0b000);
+        // test_bivariate_parity_fn_impl(3, 0b0000100);
+    }
+
+    fn test_bivariate_parity_fn_impl(bits: usize, byte: u8) {
+        let (client_key, context) = KEYS.clone();
+
+        let parity_fn =
+            |index: u8| -> Cleartext<u64> { Cleartext((util::byte_to_bits(index).iter().sum::<u8>() % 2) as u64) };
+
+        println!("parity {}", parity_fn(byte).0);
+
+        let bit_cts = util::byte_to_bits(byte).map(|bit| client_key.encrypt(Cleartext(bit as u64)));
+
+        let bits_cl:Vec<_> = bit_cts.each_ref()[8 - bits..].iter().map(|ct| client_key.decrypt(&ct)).collect();
+        println!("bits {:?}", bits_cl);
+
+        let tv = generate_multivariate_test_vector(&context, bits, parity_fn);
+        let d = calculate_multivariate_function(&context, &bit_cts.each_ref()[8 - bits..], &tv);
+
+        assert_eq!(
+            client_key.decrypt(&d),
+            parity_fn(byte)
         );
     }
 }

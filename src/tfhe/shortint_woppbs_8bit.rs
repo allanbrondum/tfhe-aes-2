@@ -287,7 +287,6 @@ impl FheContext {
         Byte::new(bits)
     }
 
-    // todo is this a bootstrap? does it reset noise?
     /// Functional bootstrap of 8 bit `shortint` from individual bits
     pub fn bootstrap_from_bits(&self, byte: &Byte<BitCt>, lut: &ShortintWopbsLUT) -> IntByte {
         assert_eq!(lut.as_ref().output_ciphertext_count(), CiphertextCount(1));
