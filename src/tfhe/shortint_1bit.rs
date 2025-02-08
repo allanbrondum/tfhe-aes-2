@@ -1,5 +1,5 @@
 //! Model with each ciphertext representing 1 bit. Build on `tfhe-rs` `shortint` module but with
-//! additional primitives for multivariate function bootstrapping
+//! additional primitives for multivariate functional bootstrap
 
 use crate::tfhe::{ClientKeyT, ContextT};
 use rayon::iter::IntoParallelRefIterator;
@@ -37,7 +37,6 @@ use tracing::debug;
 ///     - 7 :   4,  9,  684,    1, 23,     3,  4,     57, 2.2e-20
 ///     ...
 /// ```
-
 // const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
 //     lwe_dimension: LweDimension(684),
 //     glwe_dimension: GlweDimension(4),
@@ -60,12 +59,13 @@ use tracing::debug;
 //     encryption_key_choice: EncryptionKeyChoice::Small,
 // };
 
+/// !Testing parameters! not valid for real usage
 const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
     lwe_dimension: LweDimension(640),
     glwe_dimension: GlweDimension(4),
     polynomial_size: PolynomialSize(512),
     lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-        4.7280002450549286e-05,
+        4.7280002450549286e-07,
     )),
     glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
         2.845267479601915e-15,
@@ -344,6 +344,7 @@ fn apply_blind_rotate(
 }
 
 fn encode_bit(clear: Cleartext<u64>) -> Plaintext<u64> {
+    assert!(clear.0 < 2, "cleartext out of bounds: {}", clear.0);
     // 0/1 bit is represented at next highest bit
     Plaintext(clear.0 << 62)
 }
@@ -556,15 +557,7 @@ fn apply_selectors_rec(
             .par_iter()
             .map(|tv| context.bootstrap(selector, tv))
             .chunks(2)
-            .map(|mut tv| {
-                // // todo
-                // static IDENTITY_LUT: OnceLock<TestVector> = OnceLock::new();
-                // let lut =
-                //     IDENTITY_LUT.get_or_init(|| context.test_vector_from_cleartext_fn(|byte| byte));
-                // context.bootstrap_assign(&mut tv[0], &lut);
-                // context.bootstrap_assign(&mut tv[1], &lut);
-                context.test_vector_from_ciphertexts(&tv[0], &tv[1])
-            })
+            .map(|mut tv| context.test_vector_from_ciphertexts(&tv[0], &tv[1]))
             .collect();
         debug!(
             "applied mv selectors {:?}, missing {} levels",
@@ -701,30 +694,39 @@ pub mod test {
     fn test_bivariate_parity_fn_3() {
         logger::init(LevelFilter::DEBUG);
 
-        test_bivariate_parity_fn_impl(2, 0b001);
-        test_bivariate_parity_fn_impl(2, 0b000);
-        // test_bivariate_parity_fn_impl(3, 0b0000100);
+        test_bivariate_parity_fn_impl(3, 0b001);
+        test_bivariate_parity_fn_impl(3, 0b000);
+        test_bivariate_parity_fn_impl(3, 0b100);
+        test_bivariate_parity_fn_impl(3, 0b101);
+    }
+
+    #[test]
+    fn test_bivariate_parity_fn_8() {
+        logger::init(LevelFilter::DEBUG);
+
+        test_bivariate_parity_fn_impl(8, 0b11001001);
+        test_bivariate_parity_fn_impl(8, 0b01001001);
+        test_bivariate_parity_fn_impl(8, 0b00101010);
+        test_bivariate_parity_fn_impl(8, 0b11011001);
     }
 
     fn test_bivariate_parity_fn_impl(bits: usize, byte: u8) {
         let (client_key, context) = KEYS.clone();
 
-        let parity_fn =
-            |index: u8| -> Cleartext<u64> { Cleartext((util::byte_to_bits(index).iter().sum::<u8>() % 2) as u64) };
+        let parity_fn = |index: u8| -> Cleartext<u64> {
+            Cleartext((util::byte_to_bits(index).iter().sum::<u8>() % 2) as u64)
+        };
 
-        println!("parity {}", parity_fn(byte).0);
+        // println!("parity {}", parity_fn(byte).0);
 
         let bit_cts = util::byte_to_bits(byte).map(|bit| client_key.encrypt(Cleartext(bit as u64)));
 
-        let bits_cl:Vec<_> = bit_cts.each_ref()[8 - bits..].iter().map(|ct| client_key.decrypt(&ct)).collect();
-        println!("bits {:?}", bits_cl);
+        // let bits_cl:Vec<_> = bit_cts.each_ref()[8 - bits..].iter().map(|ct| client_key.decrypt(&ct)).collect();
+        // println!("bits {:?}", bits_cl);
 
         let tv = generate_multivariate_test_vector(&context, bits, parity_fn);
         let d = calculate_multivariate_function(&context, &bit_cts.each_ref()[8 - bits..], &tv);
 
-        assert_eq!(
-            client_key.decrypt(&d),
-            parity_fn(byte)
-        );
+        assert_eq!(client_key.decrypt(&d), parity_fn(byte));
     }
 }

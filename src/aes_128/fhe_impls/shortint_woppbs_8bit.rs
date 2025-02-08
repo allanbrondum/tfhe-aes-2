@@ -35,13 +35,8 @@ impl ByteT for Byte<BitCt> {
 
 impl Byte<BitCt> {
     fn bootstrap_with_lut(&self, context: &FheContext, lut: &ShortintWopbsLUT) -> Self {
-        let start = Instant::now();
         let int_byte = context.bootstrap_from_bits(&self, lut);
-        debug!("boot int {:?}", start.elapsed());
-
-        let start = Instant::now();
         let byte = context.extract_bits_from_int_byte(&int_byte);
-        debug!("extract bits {:?}", start.elapsed());
 
         byte
     }

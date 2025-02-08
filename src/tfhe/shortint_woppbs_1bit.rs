@@ -1,4 +1,4 @@
-//! Model with each ciphertext representing 8 bits. Build on `tfhe-rs` `shortint` module with WoP-PBS
+//! Model with each ciphertext representing 1 bit. Build on `tfhe-rs` `shortint` module with WoP-PBS
 
 use crate::aes_128::fhe::data_model::{BitT, Byte};
 use crate::tfhe::{ClientKeyT, ContextT};
@@ -21,6 +21,7 @@ use tfhe::shortint::{
 };
 use tracing::{debug, trace};
 
+// todo generate
 /// Parameters created from
 ///
 /// ```text
@@ -91,7 +92,6 @@ pub struct BitCt {
     pub context: FheContext,
 }
 
-impl BitT for BitCt {}
 
 impl Debug for BitCt {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -163,19 +163,6 @@ impl BitXor for BitCt {
     fn bitxor(mut self, rhs: Self) -> Self::Output {
         self.bitxor_assign(&rhs);
         self
-    }
-}
-
-/// Byte represented as 8 bits in an integer
-#[derive(Clone)]
-pub struct IntByte {
-    pub ct: shortint::ciphertext::Ciphertext,
-    pub context: FheContext,
-}
-
-impl IntByte {
-    pub fn new(fhe: shortint::ciphertext::Ciphertext, context: FheContext) -> Self {
-        Self { ct: fhe, context }
     }
 }
 
@@ -257,54 +244,34 @@ impl FheContext {
         (client_key, context)
     }
 
-    pub fn generate_lookup_table(&self, f: impl Fn(u64) -> u64) -> ShortintWopbsLUT {
-        let ct = self.server_key.create_trivial(0);
-        self.wopbs_key.generate_lut_without_padding(&ct, f).into()
-    }
-
-    /// Extract individual bits from 8 bit `shortint`
-    pub fn extract_bits_from_int_byte(&self, int_byte: &IntByte) -> Byte<BitCt> {
-        let start = Instant::now();
-
-        let bit_cts =
+    pub fn generate_multivariate_lookup_table(
+        &self,
+        bits: usize,
+        f: impl Fn(u8) -> Cleartext<u64>,
+    ) -> ShortintWopbsLUT {
+        generate_multivariate_lut(
+            bits,
             self.wopbs_key
-                .extract_bits(DeltaLog(64 - 8), &int_byte.ct, ExtractedBitsCount(8));
-
-        let bits = util::collect_array(bit_cts.iter().map(|bit_ct| {
-            let start = Instant::now();
-            let data = bit_ct.into_container().to_vec();
-            trace!("copy bit data {:?}", start.elapsed());
-
-            BitCt::new(
-                LweCiphertextOwned::create_from(
-                    data,
-                    LweCiphertextCreationMetadata {
-                        ciphertext_modulus: CiphertextModulus::new_native(),
-                    },
-                ),
-                self.clone(),
-            )
-        }));
-
-        debug!("extract bits {:?}", start.elapsed());
-
-        Byte::new(bits)
+                .wopbs_server_key
+                .bootstrapping_key
+                .polynomial_size(),
+            f,
+        )
+        .into()
     }
 
     /// Functional bootstrap of 8 bit `shortint` from individual bits
-    pub fn bootstrap_from_bits(&self, byte: &Byte<BitCt>, lut: &ShortintWopbsLUT) -> IntByte {
+    pub fn bootstrap_from_bits(&self, bits: &[&BitCt], lut: &ShortintWopbsLUT) -> BitCt {
         let start = Instant::now();
-
         assert_eq!(lut.as_ref().output_ciphertext_count(), CiphertextCount(1));
 
-        let lwe_size = byte.bits().find_any(|_| true).unwrap().ct.lwe_size();
+        let lwe_size = bits[0].ct.lwe_size();
 
-        let bit_cts: Vec<_> = byte.bits().map(|bit| bit.ct.as_view()).collect();
         let start = Instant::now();
         let mut bits_data =
-            Vec::with_capacity(bit_cts.iter().map(|bit_ct| bit_ct.as_ref().len()).sum());
-        for bit_ct in bit_cts {
-            bits_data.extend(bit_ct.as_ref());
+            Vec::with_capacity(bits.iter().map(|bit_ct| bit_ct.ct.as_ref().len()).sum());
+        for bit_ct in bits {
+            bits_data.extend(bit_ct.ct.as_ref());
         }
         trace!("copy bits data {:?}", start.elapsed());
 
@@ -323,29 +290,68 @@ impl FheContext {
             .next()
             .expect("one element");
 
-        let sks = &self.wopbs_key.wopbs_server_key;
+        debug!("circuit bootstrap {:?}", start.elapsed());
 
-        let ct = shortint::Ciphertext::new(
-            lwe_ct,
-            Degree::new(sks.message_modulus.0 - 1),
+        BitCt::new(lwe_ct, self.clone())
+    }
+
+    pub fn extract_bit_from_bit(&self, bit: &BitCt) -> BitCt {
+        let start = Instant::now();
+
+        let shortint_ct = shortint::Ciphertext::new(
+            bit.ct.clone(),
+            Degree::new(1),
             NoiseLevel::NOMINAL,
-            sks.message_modulus,
-            sks.carry_modulus,
+            MessageModulus(2),
+            CarryModulus(1),
             PBSOrder::KeyswitchBootstrap,
         );
 
-        debug!("circuit bootstrap {:?}", start.elapsed());
+        let bit_cts =
+            self.wopbs_key
+                .extract_bits(DeltaLog(63), &shortint_ct, ExtractedBitsCount(1));
 
-        IntByte::new(ct, self.clone())
+        let bit_ct = bit_cts.iter().next().expect("one bit");
+
+        let data = bit_ct.into_container().to_vec();
+
+        debug!("extract bit {:?}", start.elapsed());
+
+        BitCt::new(
+            LweCiphertextOwned::create_from(
+                data,
+                LweCiphertextCreationMetadata {
+                    ciphertext_modulus: CiphertextModulus::new_native(),
+                },
+            ),
+            self.clone(),
+        )
     }
+}
+
+fn generate_multivariate_lut(
+    bits: usize,
+    polynomial_size: PolynomialSize,
+    f: impl Fn(u8) -> Cleartext<u64>,
+) -> Vec<u64> {
+    assert!(0 < bits && bits <= 8);
+
+    let basis = 1 << bits;
+    let mut vec_lut = vec![0; polynomial_size.0];
+    for (i, value) in vec_lut.iter_mut().enumerate().take(basis as usize) {
+        assert!(i < 256);
+        *value = encode_bit(f(i as u8)).0;
+    }
+    vec_lut
 }
 
 #[cfg(test)]
 pub mod test {
     use super::*;
 
-    use crate::aes_128::fhe_encryption::{decrypt_byte, encrypt_byte};
+    use crate::logger;
     use std::sync::{Arc, LazyLock};
+    use tracing::level_filters::LevelFilter;
 
     pub static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(keys_impl);
 
@@ -400,72 +406,43 @@ pub mod test {
     }
 
     #[test]
-    fn test_bootstrap_from_bits_trivial_lut() {
-        let (client_key, context) = KEYS.clone();
+    fn test_bivariate_parity_fn_3() {
+        logger::init(LevelFilter::DEBUG);
 
-        let byte = 0b10110101;
-        let byte_fhe = encrypt_byte(client_key.as_ref(), byte);
-
-        let lut = context.generate_lookup_table(|val| val);
-        let int_byte_fhe = context.bootstrap_from_bits(&byte_fhe, &lut);
-
-        let decrypted = client_key
-            .shortint_client_key
-            .decrypt_without_padding(&int_byte_fhe.ct);
-        assert_eq!(decrypted, 0b10110101);
+        test_bivariate_parity_fn_impl(3, 0b001);
+        test_bivariate_parity_fn_impl(3, 0b000);
+        test_bivariate_parity_fn_impl(3, 0b100);
+        test_bivariate_parity_fn_impl(3, 0b101);
     }
 
     #[test]
-    fn test_bootstrap_from_bits_trivial_lut2() {
-        let (client_key, context) = KEYS.clone();
+    fn test_bivariate_parity_fn_8() {
+        logger::init(LevelFilter::DEBUG);
 
-        let byte = 0b10110101;
-        let byte_fhe = encrypt_byte(client_key.as_ref(), byte);
-
-        let byte2 = 0b01100110;
-        let byte_fhe2 = encrypt_byte(client_key.as_ref(), byte2);
-
-        let byte_fhe = byte_fhe ^ byte_fhe2.clone();
-
-        let lut = context.generate_lookup_table(|val| val);
-        let int_byte_fhe = context.bootstrap_from_bits(&byte_fhe, &lut);
-
-        let decrypted_int_byte = client_key
-            .shortint_client_key
-            .decrypt_without_padding(&int_byte_fhe.ct) as u8;
-        let decrypted_bits_byte = decrypt_byte(client_key.as_ref(), &byte_fhe);
-        assert_eq!(decrypted_int_byte, decrypted_bits_byte);
+        test_bivariate_parity_fn_impl(8, 0b11001001);
+        test_bivariate_parity_fn_impl(8, 0b01001001);
+        test_bivariate_parity_fn_impl(8, 0b00101010);
+        test_bivariate_parity_fn_impl(8, 0b11011001);
     }
 
-    #[test]
-    fn test_bootstrap_from_bits_lut() {
+    fn test_bivariate_parity_fn_impl(bits: usize, byte: u8) {
         let (client_key, context) = KEYS.clone();
 
-        let byte = 0b10110101;
-        let byte_fhe = encrypt_byte(client_key.as_ref(), byte);
+        let parity_fn = |index: u8| -> Cleartext<u64> {
+            Cleartext((util::byte_to_bits(index).iter().sum::<u8>() % 2) as u64)
+        };
 
-        let lut = context.generate_lookup_table(|val| val + 3);
-        let int_byte_fhe = context.bootstrap_from_bits(&byte_fhe, &lut);
+        // println!("parity {}", parity_fn(byte).0);
 
-        let decrypted = client_key
-            .shortint_client_key
-            .decrypt_without_padding(&int_byte_fhe.ct);
-        assert_eq!(decrypted, 0b10110101 + 3);
-    }
+        let bit_cts = util::byte_to_bits(byte).map(|bit| client_key.encrypt(Cleartext(bit as u64)));
 
-    #[test]
-    fn test_extract_bits_from_int_byte() {
-        let (client_key, context) = KEYS.clone();
+        // let bits_cl:Vec<_> = bit_cts.each_ref()[8 - bits..].iter().map(|ct| client_key.decrypt(&ct)).collect();
+        // println!("bits {:?}", bits_cl);
 
-        let int_byte_fhe = IntByte::new(
-            client_key
-                .shortint_client_key
-                .encrypt_without_padding(0b10110101),
-            context.clone(),
-        );
-        let byte_fhe = context.extract_bits_from_int_byte(&int_byte_fhe);
+        let tv = context.generate_multivariate_lookup_table(bits, parity_fn);
+        let d = context.bootstrap_from_bits(&bit_cts.each_ref()[8 - bits..], &tv);
+        let d = context.extract_bit_from_bit(&d);
 
-        let byte = decrypt_byte(client_key.as_ref(), &byte_fhe);
-        assert_eq!(byte, 0b10110101);
+        assert_eq!(client_key.decrypt(&d), parity_fn(byte));
     }
 }
