@@ -12,7 +12,7 @@ use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use std::array;
 
 use crate::tfhe::ContextT;
-use tracing::debug;
+use tracing::{debug, info};
 
 fn substitute<Bit>(byte: &Byte<Bit>) -> Byte<Bit>
 where
@@ -114,7 +114,7 @@ where
     );
 
     for i in 1..rounds {
-        debug!("starting round");
+        info!("starting round {}", i);
         debug!("sub_bytes");
         sub_bytes(&mut state_fhe);
         debug!("shift_rows");
@@ -161,6 +161,7 @@ where
     }
 
     for i in 4..44 {
+        info!("key schedule index {}", i);
         if i % 4 == 0 {
             expanded_key[i] =
                 expanded_key[i - 4].clone() ^ &sub_word(expanded_key[i - 1].clone().rotate_left(1));

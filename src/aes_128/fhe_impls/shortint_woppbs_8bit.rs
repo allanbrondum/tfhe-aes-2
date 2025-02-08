@@ -58,11 +58,6 @@ mod test {
     fn test_two_rounds() {
         logger::init(LevelFilter::INFO);
 
-        // rayon::ThreadPoolBuilder::new()
-        //     .num_threads(16)
-        //     .build_global()
-        //     .unwrap();
-        // debug!("current_num_threads: {}", rayon::current_num_threads());
 
         let (client_key, ctx) = crate::tfhe::shortint_woppbs_8bit::test::KEYS.clone();
 

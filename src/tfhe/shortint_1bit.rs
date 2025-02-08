@@ -7,7 +7,7 @@ use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::fmt::{Debug, Formatter};
 use std::iter;
 use std::ops::{BitXor, BitXorAssign};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 use tfhe::core_crypto::algorithms::{
     glwe_sample_extraction, lwe_keyswitch, lwe_programmable_bootstrapping,
@@ -23,23 +23,60 @@ use tfhe::shortint::server_key::ShortintBootstrappingKey;
 use tfhe::shortint::{CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus};
 use tracing::debug;
 
+/// Parameters created from
+///
+/// ```text
+/// ./optimizer  --min-precision 1 --max-precision 1 --p-error 5.42101086e-20 --ciphertext-modulus-log 64
+/// security level: 128
+/// target p_error: 5.4e-20
+/// per precision and log norm2:
+///
+///   - 1: # bits
+///     -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b,  cost, p_error
+///     ...
+///     - 7 :   4,  9,  684,    1, 23,     3,  4,     57, 2.2e-20
+///     ...
+/// ```
+
+// const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
+//     lwe_dimension: LweDimension(684),
+//     glwe_dimension: GlweDimension(4),
+//     polynomial_size: PolynomialSize(512),
+//     lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+//         4.7280002450549286e-05,
+//     )),
+//     glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+//         2.845267479601915e-15,
+//     )),
+//     pbs_base_log: DecompositionBaseLog(23),
+//     pbs_level: DecompositionLevelCount(1),
+//     ks_base_log: DecompositionBaseLog(4),
+//     ks_level: DecompositionLevelCount(3),
+//     message_modulus: MessageModulus(2),
+//     carry_modulus: CarryModulus(1),
+//     max_noise_level: MaxNoiseLevel::new(11),
+//     log2_p_fail: -64.074,
+//     ciphertext_modulus: CiphertextModulus::new_native(),
+//     encryption_key_choice: EncryptionKeyChoice::Small,
+// };
+
 const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
-    lwe_dimension: LweDimension(692),
+    lwe_dimension: LweDimension(640),
     glwe_dimension: GlweDimension(4),
     polynomial_size: PolynomialSize(512),
     lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-        3.5539902359442825e-6,
+        4.7280002450549286e-05,
     )),
     glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
         2.845267479601915e-15,
     )),
-    pbs_base_log: DecompositionBaseLog(12),
-    pbs_level: DecompositionLevelCount(3),
-    ks_base_log: DecompositionBaseLog(3),
-    ks_level: DecompositionLevelCount(4),
+    pbs_base_log: DecompositionBaseLog(6),
+    pbs_level: DecompositionLevelCount(7),
+    ks_base_log: DecompositionBaseLog(2),
+    ks_level: DecompositionLevelCount(6),
     message_modulus: MessageModulus(2),
     carry_modulus: CarryModulus(1),
-    max_noise_level: MaxNoiseLevel::new(20),
+    max_noise_level: MaxNoiseLevel::new(100),
     log2_p_fail: -64.074,
     ciphertext_modulus: CiphertextModulus::new_native(),
     encryption_key_choice: EncryptionKeyChoice::Small,
@@ -460,11 +497,11 @@ pub fn generate_multivariate_test_vector(
     f: impl Fn(u8) -> Cleartext<u64>,
 ) -> MultivariateTestVector {
     let start = Instant::now();
-    assert_ne!(bits, 0);
+    assert!(0 < bits && bits <= 8);
 
-    let test_vectors = (0..(1u8 << bits))
+    let test_vectors = (0..(1usize << bits))
         .step_by(2)
-        .map(|val| context.test_vector_from_cleartext_fn(|bit_val| f(val + bit_val.0 as u8)))
+        .map(|val| context.test_vector_from_cleartext_fn(|bit_val| f(val as u8 + bit_val.0 as u8)))
         .collect();
 
     debug!("generated mv test vector {:?}", start.elapsed());
@@ -500,7 +537,14 @@ fn apply_selectors_rec(
             .par_iter()
             .map(|tv| context.bootstrap(selector, tv))
             .chunks(2)
-            .map(|tv| context.test_vector_from_ciphertexts(&tv[0], &tv[1]))
+            .map(|mut tv| {
+                // todo
+                static IDENTITY_LUT: OnceLock<TestVector> = OnceLock::new();
+                let lut = IDENTITY_LUT.get_or_init(|| context.test_vector_from_cleartext_fn(|byte| byte));
+                context.bootstrap_assign(&mut tv[0], &lut);
+                context.bootstrap_assign(&mut tv[1], &lut);
+                context.test_vector_from_ciphertexts(&tv[0], &tv[1])
+            })
             .collect();
         debug!(
             "applied mv selectors {:?}, missing {} levels",
