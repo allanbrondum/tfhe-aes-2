@@ -1,5 +1,6 @@
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
+use rayon::iter::IndexedParallelIterator;
 use std::fmt::Debug;
 use std::mem;
 
@@ -31,14 +32,24 @@ pub fn shl_array<const N: usize, T: Default>(array: &mut [T; N], shl: usize) {
     }
 }
 
-pub fn byte_to_bits(byte: u8) -> impl Iterator<Item = u8> {
-    (0..8).map(move |i| if 0 == (byte & (0x80 >> i)) { 0 } else { 1 })
+pub fn byte_to_bits(byte: u8) -> impl ParallelIterator<Item = u8> {
+    (0..8).into_par_iter().map(move |i| if 0 == (byte & (0x80 >> i)) { 0 } else { 1 })
 }
 
-// todo
+pub fn bits_to_byte<M: IntoParallelIterator<Item = u8>>(bits: M) -> u8
+where
+    M::Iter: IndexedParallelIterator<Item = u8>,
+{
+    bits.into_par_iter()
+        .enumerate()
+        .map(|(i, bit)| bit << (7 - i))
+        .sum()
+}
+
 
 #[cfg(test)]
 mod test {
+    use rayon::iter::IntoParallelRefIterator;
     use super::*;
 
     #[test]
@@ -58,7 +69,13 @@ mod test {
 
     #[test]
     fn test_byte_to_bits() {
-        let bits: [u8; 8] = collect_array(byte_to_bits(0b01100011));
+        let bits: [u8; 8] = par_collect_array(byte_to_bits(0b01100011));
         assert_eq!(bits, [0, 1, 1, 0, 0, 0, 1, 1]);
+    }
+
+    #[test]
+    fn test_bits_to_byte() {
+        let byte = bits_to_byte([0, 1, 1, 0, 0, 0, 1, 1].par_iter().copied());
+        assert_eq!(byte, 0b01100011);
     }
 }

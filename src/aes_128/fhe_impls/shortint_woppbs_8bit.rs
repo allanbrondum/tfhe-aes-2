@@ -74,82 +74,62 @@ use crate::aes_128::plain;
 use crate::tfhe::shortint_woppbs_8bit::*;
 use crate::util;
 use rayon::iter::ParallelIterator;
-use rayon::iter::{IntoParallelRefIterator, ParallelBridge};
+use rayon::iter::IntoParallelRefIterator;
 use tfhe::core_crypto::entities::Cleartext;
 
 pub fn fhe_encrypt_word_array<const N: usize>(
     client_key: &ClientKey,
     array: &[plain::data_model::Word; N],
 ) -> [Word<BitCt>; N] {
-    array
-        .par_iter()
-        .map(|word| Word::new(fhe_encrypt_byte_array(client_key, &word.0)))
-        .collect::<Vec<_>>()
-        .try_into()
-        .expect("constant length")
+    util::par_collect_array(
+        array
+            .par_iter()
+            .map(|word| Word::new(fhe_encrypt_byte_array(client_key, &word.0))),
+    )
 }
 
 pub fn fhe_encrypt_byte_array<const N: usize>(
     client_key: &ClientKey,
     array: &[u8; N],
 ) -> [Byte<BitCt>; N] {
-    array
-        .par_iter()
-        .map(|&byte| fhe_encrypt_byte(client_key, byte.into()))
-        .collect::<Vec<_>>()
-        .try_into()
-        .expect("constant length")
+    util::par_collect_array(
+        array
+            .par_iter()
+            .map(|&byte| fhe_encrypt_byte(client_key, byte.into())),
+    )
 }
 
 pub fn fhe_encrypt_byte(client_key: &ClientKey, byte: u8) -> Byte<BitCt> {
     Byte::new(util::par_collect_array(
-        util::byte_to_bits(byte)
-            .par_bridge()
-            .map(|b| client_key.encrypt(Cleartext(b as u64))),
+        util::byte_to_bits(byte).map(|b| client_key.encrypt(Cleartext(b as u64))),
     ))
 }
-//
-//
-//
-// pub fn fhe_decrypt_word_array<const N: usize>(
-//     client_key: &shortint::client_key::ClientKey,
-//     array: &[WordFhe; N],
-// ) -> [Word; N] {
-//     array
-//         .par_iter()
-//         .map(|word| Word(fhe_decrypt_bool_byte_array(client_key, &word.0)))
-//         .collect::<Vec<_>>()
-//         .try_into()
-//         .expect("constant length")
-// }
-//
-// pub fn fhe_decrypt_byte_array<const N: usize>(
-//     client_key: &shortint::client_key::ClientKey,
-//     array: &[BoolByteFhe; N],
-// ) -> [u8; N] {
-//     array
-//         .par_iter()
-//         .map(|byte| fhe_decrypt_byte(client_key, byte).into())
-//         .collect::<Vec<_>>()
-//         .try_into()
-//         .expect("constant length")
-// }
-//
-//
-//
-// pub fn fhe_decrypt_byte(
-//     client_key: &shortint::client_key::ClientKey,
-//     byte: &BoolByteFhe,
-// ) -> BoolByte {
-//     BoolByte(
-//         byte.0
-//             .par_iter()
-//             .map(|b| fhe_decrypt_bool(client_key, b))
-//             .collect::<Vec<_>>()
-//             .try_into()
-//             .expect("constant length"),
-//     )
-// }
+
+pub fn fhe_decrypt_word_array<const N: usize>(
+    client_key: &ClientKey,
+    array: &[Word<BitCt>; N],
+) -> [plain::data_model::Word; N] {
+    util::par_collect_array(
+        array
+            .par_iter()
+            .map(|word| plain::data_model::Word(fhe_decrypt_byte_array(client_key, &word.0))),
+    )
+}
+
+pub fn fhe_decrypt_byte_array<const N: usize>(
+    client_key: &ClientKey,
+    array: &[Byte<BitCt>; N],
+) -> [u8; N] {
+    util::par_collect_array(
+        array
+            .par_iter()
+            .map(|byte| fhe_decrypt_byte(client_key, byte).into()),
+    )
+}
+
+pub fn fhe_decrypt_byte(client_key: &ClientKey, byte: &Byte<BitCt>) -> u8 {
+    util::bits_to_byte(byte.bits().map(|bit| client_key.decrypt(bit).0 as u8))
+}
 
 // #[cfg(test)]
 // mod test {

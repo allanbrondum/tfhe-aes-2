@@ -4,16 +4,20 @@
 pub mod data_model;
 
 use crate::aes_128::fhe::data_model::{BitT, Block, Byte, ByteT, State, Word};
+use crate::aes_128::RC;
 use crate::util;
+use rayon::iter::IndexedParallelIterator;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelBridge};
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use std::array;
 use std::fmt::Debug;
 use std::ops::{BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
 use tracing::debug;
-use crate::aes_128::RC;
 
-fn substitute<Bit>(byte: &Byte<Bit>) -> Byte<Bit> where Byte<Bit>: ByteT{
+fn substitute<Bit>(byte: &Byte<Bit>) -> Byte<Bit>
+where
+    Byte<Bit>: ByteT,
+{
     byte.aes_substitute()
 }
 
@@ -23,16 +27,19 @@ fn xor_state<Bit: BitT>(state: &mut State<Bit>, key: &[Word<Bit>; 4]) {
     }
 }
 
-fn sub_bytes<Bit:BitT>(state: &mut State<Bit>) where Byte<Bit>: ByteT{
-    state.bytes_mut().par_bridge().for_each(|byte| {
+fn sub_bytes<Bit: BitT>(state: &mut State<Bit>)
+where
+    Byte<Bit>: ByteT,
+{
+    state.bytes_mut().for_each(|byte| {
         *byte = substitute(byte);
     })
 }
 
-fn shift_rows<Bit:BitT>(state: &mut State<Bit>) {
-    for (i, row) in state.rows_mut().enumerate() {
+fn shift_rows<Bit: BitT>(state: &mut State<Bit>) {
+    state.rows_mut().enumerate().for_each(|(i, row)| {
         row.rotate_left_assign(i);
-    }
+    });
 }
 
 /// Multiplication in F_2[X]/(X^8 + X^4 + X^3 + X + 1)
@@ -81,7 +88,10 @@ pub fn encrypt_block<Bit: BitT>(
     expanded_key_fhe: &[Word<Bit>; 44],
     block: Block<Bit>,
     rounds: usize,
-) -> Block<Bit> where Byte<Bit>: ByteT{
+) -> Block<Bit>
+where
+    Byte<Bit>: ByteT,
+{
     let mut state_fhe = State::from_array(block);
 
     xor_state(
@@ -120,7 +130,10 @@ pub fn encrypt_block<Bit: BitT>(
     state_fhe.into_array()
 }
 
-pub fn key_schedule<Bit:BitT>(key_slice: &[Byte<Bit>; 16]) -> [Word<Bit>; 44] where Byte<Bit>: ByteT{
+pub fn key_schedule<Bit: BitT>(key_slice: &[Byte<Bit>; 16]) -> [Word<Bit>; 44]
+where
+    Byte<Bit>: ByteT,
+{
     let mut key: [Word<Bit>; 4] = Default::default();
     let mut expanded_key: [Word<Bit>; 44] = array::from_fn(|_| Word::default());
 
@@ -150,18 +163,27 @@ pub fn key_schedule<Bit:BitT>(key_slice: &[Byte<Bit>; 16]) -> [Word<Bit>; 44] wh
     expanded_key
 }
 
-fn boot_word<Bit:BitT>(word: &mut Word<Bit>) where Byte<Bit>: ByteT{
-    word.bytes_mut().par_bridge().for_each(|byte| {
+fn boot_word<Bit: BitT>(word: &mut Word<Bit>)
+where
+    Byte<Bit>: ByteT,
+{
+    word.bytes_mut().for_each(|byte| {
         *byte = boot_byte(byte);
     });
 }
 
-fn boot_byte<Bit>(byte: &Byte<Bit>) -> Byte<Bit> where Byte<Bit>: ByteT{
+fn boot_byte<Bit>(byte: &Byte<Bit>) -> Byte<Bit>
+where
+    Byte<Bit>: ByteT,
+{
     byte.bootstrap()
 }
 
-fn sub_word<Bit:BitT>(mut word: Word<Bit>) -> Word<Bit> where Byte<Bit>: ByteT{
-    word.bytes_mut().par_bridge().for_each(|byte| {
+fn sub_word<Bit: BitT>(mut word: Word<Bit>) -> Word<Bit>
+where
+    Byte<Bit>: ByteT,
+{
+    word.bytes_mut().for_each(|byte| {
         *byte = substitute(byte);
     });
 

@@ -215,14 +215,14 @@ impl IntByteFhe {
 impl IntByteFhe {
     pub fn bootstrap_from_bool_byte(byte: &Byte<BitCt>, lut: &ShortintWopbsLUT) -> Self {
         assert_eq!(lut.as_ref().output_ciphertext_count(), CiphertextCount(1));
-        let context = &byte.bits().next().unwrap().context;
+        let context = &byte.bits().find_any(|_| true).unwrap().context;
 
-        let lwe_size = byte.bits().next().unwrap().ct.lwe_size();
+        let lwe_size = byte.bits().find_any(|_| true).unwrap().ct.lwe_size();
 
-        let bit_cts = byte.bits().map(|bit| bit.ct.as_view());
+        let bit_cts:Vec<_> = byte.bits().map(|bit| bit.ct.as_view()).collect();
         let start = Instant::now();
         let bits_data: Vec<u64> = bit_cts
-            .flat_map(|bit_ct| bit_ct.into_container().iter().copied())
+            .iter().flat_map(|bit_ct| bit_ct.into_container().iter().copied())
             .collect();
         debug!("copy bits data {:?}", start.elapsed());
 

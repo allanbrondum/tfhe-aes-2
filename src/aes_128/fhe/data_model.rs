@@ -1,6 +1,9 @@
 use crate::util;
-use rayon::iter::ParallelBridge;
 use rayon::iter::ParallelIterator;
+use rayon::iter::{
+    IntoParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelBridge,
+};
+use rayon::prelude::IndexedParallelIterator;
 use std::fmt::Debug;
 use std::mem;
 use std::ops::{BitAnd, BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
@@ -24,17 +27,17 @@ pub trait ByteT: Sized {
 #[derive(Debug, Clone, Default)]
 pub struct Byte<Bit>([Bit; 8]);
 
-impl<Bit> Byte<Bit> {
+impl<Bit: Send + Sync> Byte<Bit> {
     pub fn new(bits: [Bit; 8]) -> Self {
         Self(bits)
     }
 
-    pub fn bits(&self) -> impl Iterator<Item = &Bit> + '_ {
-        self.0.iter()
+    pub fn bits(&self) -> impl IndexedParallelIterator<Item = &Bit> + '_ {
+        self.0.par_iter()
     }
 
-    pub fn bits_mut(&mut self) -> impl Iterator<Item = &mut Bit> + '_ {
-        self.0.iter_mut()
+    pub fn bits_mut(&mut self) -> impl IndexedParallelIterator<Item = &mut Bit> + '_ {
+        self.0.par_iter_mut()
     }
 }
 
@@ -42,7 +45,11 @@ impl<Bit: BitT> Byte<Bit> {
     pub fn trivial(val: u8) -> Self {
         let mut byte = Byte::default();
         for i in 0..8 {
-            byte[i] = Bit::trivial(if 0 == (val & (0x80 >> i)) { Cleartext(0) } else { Cleartext(1) });
+            byte[i] = Bit::trivial(if 0 == (val & (0x80 >> i)) {
+                Cleartext(0)
+            } else {
+                Cleartext(1)
+            });
         }
         byte
     }
@@ -76,13 +83,9 @@ impl<Bit: BitT> ShlAssign<usize> for Byte<Bit> {
 
 impl<Bit: BitT> BitXorAssign<&Byte<Bit>> for Byte<Bit> {
     fn bitxor_assign(&mut self, rhs: &Self) {
-        self.0
-            .iter_mut()
-            .zip(rhs.0.iter())
-            .par_bridge()
-            .for_each(|(b, rhs_b)| {
-                *b ^= rhs_b;
-            });
+        self.bits_mut().zip(rhs.bits()).for_each(|(b, rhs_b)| {
+            *b ^= rhs_b;
+        });
     }
 }
 
@@ -96,23 +99,23 @@ impl<Bit: BitT> BitXor for Byte<Bit> {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct Word<Bit>([Byte<Bit>; 4]);
+pub struct Word<Bit>(pub [Byte<Bit>; 4]);
 
-impl<Bit> Word<Bit> {
+impl<Bit: Send + Sync> Word<Bit> {
     pub fn new(bytes: [Byte<Bit>; 4]) -> Self {
         Self(bytes)
     }
 
-    pub fn bytes(&self) -> impl Iterator<Item = &Byte<Bit>> + '_ {
-        self.0.iter()
+    pub fn bytes(&self) -> impl IndexedParallelIterator<Item = &Byte<Bit>> + '_ {
+        self.0.par_iter()
     }
 
-    pub fn into_bytes(self) -> impl Iterator<Item = Byte<Bit>> {
-        self.0.into_iter()
+    pub fn into_bytes(self) -> impl IndexedParallelIterator<Item = Byte<Bit>> {
+        self.0.into_par_iter()
     }
 
-    pub fn bytes_mut(&mut self) -> impl Iterator<Item = &mut Byte<Bit>> {
-        self.0.iter_mut()
+    pub fn bytes_mut(&mut self) -> impl IndexedParallelIterator<Item = &mut Byte<Bit>> {
+        self.0.par_iter_mut()
     }
 
     pub fn rotate_left(mut self, mid: usize) -> Self {
@@ -143,7 +146,6 @@ impl<Bit: BitT> BitXorAssign<&Self> for Word<Bit> {
     fn bitxor_assign(&mut self, rhs: &Self) {
         self.bytes_mut()
             .zip(rhs.bytes())
-            .par_bridge()
             .for_each(|(byte, rhs_byte)| {
                 *byte ^= rhs_byte;
             });
@@ -184,16 +186,16 @@ impl<Bit: BitT> State<Bit> {
         array
     }
 
-    pub fn bytes_mut(&mut self) -> impl Iterator<Item = &mut Byte<Bit>> {
-        self.0.iter_mut().flat_map(|w| w.0.iter_mut())
+    pub fn bytes_mut(&mut self) -> impl ParallelIterator<Item = &mut Byte<Bit>> {
+        self.0.par_iter_mut().flat_map(|w| w.0.par_iter_mut())
     }
 
-    pub fn rows_mut(&mut self) -> impl Iterator<Item = &mut Word<Bit>> {
-        self.0.iter_mut()
+    pub fn rows_mut(&mut self) -> impl IndexedParallelIterator<Item = &mut Word<Bit>> {
+        self.0.par_iter_mut()
     }
 
-    pub fn columns(&self) -> impl Iterator<Item = ColumnViewFhe<'_, Bit>> {
-        (0..4).map(|j| ColumnViewFhe(j, &self.0))
+    pub fn columns(&self) -> impl IndexedParallelIterator<Item = ColumnViewFhe<'_, Bit>> {
+        (0..4).into_par_iter().map(|j| ColumnViewFhe(j, &self.0))
     }
 
     pub fn column(&self, j: usize) -> ColumnViewFhe<'_, Bit> {
@@ -223,8 +225,8 @@ impl<Bit> IndexMut<usize> for State<Bit> {
 pub struct ColumnViewFhe<'a, Bit>(usize, &'a [Word<Bit>; 4]);
 
 impl<Bit: BitT> ColumnViewFhe<'_, Bit> {
-    pub fn bytes(&self) -> impl Iterator<Item = &Byte<Bit>> + '_ {
-        (0..4).map(|i| &self.1[i][self.0])
+    pub fn bytes(&self) -> impl IndexedParallelIterator<Item = &Byte<Bit>> + '_ {
+        (0..4).into_par_iter().map(|i| &self.1[i][self.0])
     }
 
     pub fn clone_to_word(&self) -> Word<Bit> {
@@ -246,26 +248,29 @@ impl<Bit> Index<usize> for ColumnViewFhe<'_, Bit> {
 pub struct ColumnViewMutFhe<'a, Bit>(usize, &'a mut [Word<Bit>; 4]);
 
 impl<Bit: BitT> ColumnViewMutFhe<'_, Bit> {
-    pub fn bytes(&self) -> impl Iterator<Item = &Byte<Bit>> + '_ {
-        (0..4).map(|i| &self.1[i][self.0])
+    pub fn bytes(&self) -> impl IndexedParallelIterator<Item = &Byte<Bit>> + '_ {
+        (0..4).into_par_iter().map(|i| &self.1[i][self.0])
     }
 
-    pub fn bytes_mut(&mut self) -> impl Iterator<Item = &'_ mut Byte<Bit>> + '_ {
-        self.1.iter_mut().map(|row| &mut row[self.0])
+    pub fn bytes_mut(&mut self) -> impl IndexedParallelIterator<Item = &'_ mut Byte<Bit>> + '_ {
+        self.1.into_par_iter().map(|row| &mut row[self.0])
     }
 
     pub fn bitxor_assign(&mut self, rhs: &Word<Bit>) {
         self.bytes_mut()
             .zip(rhs.bytes())
-            .par_bridge()
             .for_each(|(byte, rhs_byte)| {
                 *byte ^= rhs_byte;
             });
     }
 
     pub fn assign(&mut self, rhs: Word<Bit>) {
-        for (i, byte) in rhs.into_bytes().enumerate() {
-            self.1[i][self.0] = byte;
-        }
+        rhs.into_bytes()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .enumerate()
+            .for_each(|(i, byte)| {
+                self.1[i][self.0] = byte;
+            });
     }
 }
