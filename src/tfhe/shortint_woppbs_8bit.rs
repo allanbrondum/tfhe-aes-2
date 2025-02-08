@@ -213,7 +213,8 @@ impl IntByteFhe {
 }
 
 impl IntByteFhe {
-    pub fn bootstrap_from_bool_byte(byte: &Byte<BitCt>, lut: &ShortintWopbsLUT) -> Self {
+    // todo is this a bootstrap? does it reset noise?
+    pub fn bootstrap_from_bits(byte: &Byte<BitCt>, lut: &ShortintWopbsLUT) -> Self {
         assert_eq!(lut.as_ref().output_ciphertext_count(), CiphertextCount(1));
         let context = &byte.bits().find_any(|_| true).unwrap().context;
 
@@ -269,7 +270,7 @@ impl IntByteFhe {
 }
 
 impl Byte<BitCt> {
-    pub fn bootstrap_from_int_byte(int_byte: &IntByteFhe) -> Self {
+    pub fn extract_bits_from_int_byte(int_byte: &IntByteFhe) -> Self {
         let context = &int_byte.context;
 
         let bit_cts =
@@ -360,6 +361,7 @@ impl FheContext {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::aes_128::fhe_impls::shortint_woppbs_8bit::{fhe_decrypt_byte, fhe_encrypt_byte};
     use std::sync::{Arc, LazyLock};
     use std::time::Instant;
     use tfhe::core_crypto::prelude::*;
@@ -422,66 +424,65 @@ mod test {
         );
     }
 
-    //
-    // #[test]
-    // fn test_pbssub_wop_shortint_int_byte_boostrap_from_bool_byte_fhe() {
-    //     let (client_key, context) = KEYS.clone();
-    //
-    //     let bool_byte = BoolByte::from(0b10110101);
-    //     let bool_byte_fhe = fhe_encrypt_byte(&client_key, &context, bool_byte);
-    //
-    //     let lut = IntByteFhe::generate_lookup_table(&context, |val| val);
-    //     let int_byte_fhe = IntByteFhe::bootstrap_from_bool_byte(&bool_byte_fhe, &lut);
-    //
-    //     let decrypted = client_key.decrypt_without_padding(&int_byte_fhe.ct);
-    //     assert_eq!(decrypted, 0b10110101);
-    // }
-    //
-    // #[test]
-    // fn test_pbssub_wop_shortint_int_byte_boostrap_from_bool_byte_fhe2() {
-    //     let (client_key, context) = KEYS.clone();
-    //
-    //     let bool_byte = BoolByte::from(0b10110101);
-    //     let bool_byte_fhe = fhe_encrypt_byte(&client_key, &context, bool_byte);
-    //
-    //     let bool_byte2 = BoolByte::from(0b01100110);
-    //     let bool_byte_fhe2 = fhe_encrypt_byte(&client_key, &context, bool_byte2);
-    //
-    //     let bool_byte_fhe = bool_byte_fhe ^ bool_byte_fhe2.clone();
-    //
-    //     let lut = IntByteFhe::generate_lookup_table(&context, |val| val);
-    //     let int_byte_fhe = IntByteFhe::bootstrap_from_bool_byte(&bool_byte_fhe, &lut);
-    //
-    //     let decrypted_int = client_key.decrypt_without_padding(&int_byte_fhe.ct) as u8;
-    //     let decrypted_bool = u8::from(fhe_decrypt_byte(&client_key, &bool_byte_fhe));
-    //     assert_eq!(decrypted_int, decrypted_bool);
-    // }
-    //
-    // #[test]
-    // fn test_pbssub_wop_shortint_int_byte_boostrap_from_bool_byte_fhe_lut() {
-    //     let (client_key, context) = KEYS.clone();
-    //
-    //     let bool_byte = BoolByte::from(0b10110101);
-    //     let bool_byte_fhe = fhe_encrypt_byte(&client_key, &context, bool_byte);
-    //
-    //     let lut = IntByteFhe::generate_lookup_table(&context, |val| val + 3);
-    //     let int_byte_fhe = IntByteFhe::bootstrap_from_bool_byte(&bool_byte_fhe, &lut);
-    //
-    //     let decrypted = client_key.decrypt_without_padding(&int_byte_fhe.ct);
-    //     assert_eq!(decrypted, 0b10110101 + 3);
-    // }
-    //
-    // #[test]
-    // fn test_pbssub_wop_shortint_bool_byte_boostrap_from_int_byte_fhe() {
-    //     let (client_key, context) = KEYS.clone();
-    //
-    //     let int_byte_fhe = IntByteFhe::new(client_key.encrypt_without_padding(0b10110101), context);
-    //     let bool_byte_fhe = BoolByteFhe::bootstrap_from_int_byte(&int_byte_fhe);
-    //
-    //     let bool_byte = fhe_decrypt_byte(&client_key, &bool_byte_fhe);
-    //     assert_eq!(u8::from(bool_byte), 0b10110101);
-    // }
-    //
+    #[test]
+    fn test_bootstrap_from_bits_trivial_lut() {
+        let (client_key, context) = KEYS.clone();
+
+        let byte = 0b10110101;
+        let byte_fhe = fhe_encrypt_byte(&client_key, byte);
+
+        let lut = IntByteFhe::generate_lookup_table(&context, |val| val);
+        let int_byte_fhe = IntByteFhe::bootstrap_from_bits(&byte_fhe, &lut);
+
+        let decrypted = client_key.0.decrypt_without_padding(&int_byte_fhe.ct);
+        assert_eq!(decrypted, 0b10110101);
+    }
+
+    #[test]
+    fn test_bootstrap_from_bits_trivial_lut2() {
+        let (client_key, context) = KEYS.clone();
+
+        let byte = 0b10110101;
+        let byte_fhe = fhe_encrypt_byte(&client_key, byte);
+
+        let byte2 = 0b01100110;
+        let byte_fhe2 = fhe_encrypt_byte(&client_key, byte2);
+
+        let byte_fhe = byte_fhe ^ byte_fhe2.clone();
+
+        let lut = IntByteFhe::generate_lookup_table(&context, |val| val);
+        let int_byte_fhe = IntByteFhe::bootstrap_from_bits(&byte_fhe, &lut);
+
+        let decrypted_int_byte = client_key.0.decrypt_without_padding(&int_byte_fhe.ct) as u8;
+        let decrypted_bits_byte = fhe_decrypt_byte(&client_key, &byte_fhe);
+        assert_eq!(decrypted_int_byte, decrypted_bits_byte);
+    }
+
+    #[test]
+    fn test_bootstrap_from_bits_lut() {
+        let (client_key, context) = KEYS.clone();
+
+        let byte = 0b10110101;
+        let byte_fhe = fhe_encrypt_byte(&client_key, byte);
+
+        let lut = IntByteFhe::generate_lookup_table(&context, |val| val + 3);
+        let int_byte_fhe = IntByteFhe::bootstrap_from_bits(&byte_fhe, &lut);
+
+        let decrypted = client_key.0.decrypt_without_padding(&int_byte_fhe.ct);
+        assert_eq!(decrypted, 0b10110101 + 3);
+    }
+
+    #[test]
+    fn test_extract_bits_from_int_byte() {
+        let (client_key, context) = KEYS.clone();
+
+        let int_byte_fhe = IntByteFhe::new(client_key.0.encrypt_without_padding(0b10110101), context);
+        let bool_byte_fhe = Byte::extract_bits_from_int_byte(&int_byte_fhe);
+
+        let bool_byte = fhe_decrypt_byte(&client_key, &bool_byte_fhe);
+        assert_eq!(u8::from(bool_byte), 0b10110101);
+    }
+
     // #[test]
     // fn test_pbssub_wob_shortint_perf() {
     //     let start = Instant::now();
@@ -512,8 +513,9 @@ mod test {
     //     debug!("bootstrap elapsed: {:?}", start.elapsed());
     // }
     //
+
     // #[test]
-    // fn test_pbssub_wob_shortint_extract_bits() {
+    // fn test_extract_bits() {
     //     let start = Instant::now();
     //     let (client_key, context) = KEYS.clone();
     //     debug!("keys generated: {:?}", start.elapsed());
@@ -536,4 +538,5 @@ mod test {
     //         debug!("bit {}: {:b}", i, decoded);
     //     }
     // }
+
 }
