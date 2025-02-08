@@ -219,10 +219,11 @@ impl IntByteFhe {
 
         let lwe_size = byte.bits().find_any(|_| true).unwrap().ct.lwe_size();
 
-        let bit_cts:Vec<_> = byte.bits().map(|bit| bit.ct.as_view()).collect();
+        let bit_cts: Vec<_> = byte.bits().map(|bit| bit.ct.as_view()).collect();
         let start = Instant::now();
         let bits_data: Vec<u64> = bit_cts
-            .iter().flat_map(|bit_ct| bit_ct.into_container().iter().copied())
+            .iter()
+            .flat_map(|bit_ct| bit_ct.into_container().iter().copied())
             .collect();
         debug!("copy bits data {:?}", start.elapsed());
 
@@ -354,4 +355,185 @@ impl FheContext {
 
         (ClientKey(client_key, context.clone()), context)
     }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::sync::{Arc, LazyLock};
+    use std::time::Instant;
+    use tfhe::core_crypto::prelude::*;
+    use tfhe::shortint::wopbs::WopbsKey;
+    use tfhe::shortint::{
+        CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus, ShortintParameterSet,
+        WopbsParameters,
+    };
+
+    static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(|| keys_impl());
+
+    fn keys_impl() -> (Arc<ClientKey>, FheContext) {
+        let (client_key, context) = FheContext::generate_keys();
+        (client_key.into(), context)
+    }
+
+    #[test]
+    fn test_encode() {
+        assert_eq!(encode_bit(Cleartext(0)), Plaintext(0));
+        assert_eq!(encode_bit(Cleartext(1)), Plaintext(1 << 63));
+    }
+
+    #[test]
+    fn test_decode() {
+        assert_eq!(decode_bit(Plaintext(0)), Cleartext(0));
+        assert_eq!(decode_bit(Plaintext(1)), Cleartext(0));
+        assert_eq!(decode_bit(Plaintext(u64::MAX)), Cleartext(0));
+        assert_eq!(decode_bit(Plaintext(1 << 63)), Cleartext(1));
+        assert_eq!(decode_bit(Plaintext((1 << 63) - 1)), Cleartext(1));
+        assert_eq!(decode_bit(Plaintext((1 << 63) + 1)), Cleartext(1));
+    }
+
+    #[test]
+    fn test_bit() {
+        let (client_key, context) = KEYS.clone();
+
+        let mut b1 = client_key.encrypt(Cleartext(0));
+        let b2 = client_key.encrypt(Cleartext(1));
+
+        assert_eq!(client_key.decrypt(&b1), Cleartext(0));
+        assert_eq!(client_key.decrypt(&b2), Cleartext(1));
+
+        assert_eq!(client_key.decrypt(&(b1.clone() ^ b2.clone())), Cleartext(1));
+        assert_eq!(client_key.decrypt(&(b1.clone() ^ b1.clone())), Cleartext(0));
+        assert_eq!(client_key.decrypt(&(b2.clone() ^ b2.clone())), Cleartext(0));
+
+        // default/trivial
+        assert_eq!(client_key.decrypt(&BitCt::default()), Cleartext(0));
+        assert_eq!(
+            client_key.decrypt(&(b2.clone() ^ BitCt::default())),
+            Cleartext(1)
+        );
+        assert_eq!(
+            client_key.decrypt(&BitCt::trivial(Cleartext(0), context.clone())),
+            Cleartext(0)
+        );
+        assert_eq!(
+            client_key.decrypt(&BitCt::trivial(Cleartext(1), context.clone())),
+            Cleartext(1)
+        );
+    }
+
+    //
+    // #[test]
+    // fn test_pbssub_wop_shortint_int_byte_boostrap_from_bool_byte_fhe() {
+    //     let (client_key, context) = KEYS.clone();
+    //
+    //     let bool_byte = BoolByte::from(0b10110101);
+    //     let bool_byte_fhe = fhe_encrypt_byte(&client_key, &context, bool_byte);
+    //
+    //     let lut = IntByteFhe::generate_lookup_table(&context, |val| val);
+    //     let int_byte_fhe = IntByteFhe::bootstrap_from_bool_byte(&bool_byte_fhe, &lut);
+    //
+    //     let decrypted = client_key.decrypt_without_padding(&int_byte_fhe.ct);
+    //     assert_eq!(decrypted, 0b10110101);
+    // }
+    //
+    // #[test]
+    // fn test_pbssub_wop_shortint_int_byte_boostrap_from_bool_byte_fhe2() {
+    //     let (client_key, context) = KEYS.clone();
+    //
+    //     let bool_byte = BoolByte::from(0b10110101);
+    //     let bool_byte_fhe = fhe_encrypt_byte(&client_key, &context, bool_byte);
+    //
+    //     let bool_byte2 = BoolByte::from(0b01100110);
+    //     let bool_byte_fhe2 = fhe_encrypt_byte(&client_key, &context, bool_byte2);
+    //
+    //     let bool_byte_fhe = bool_byte_fhe ^ bool_byte_fhe2.clone();
+    //
+    //     let lut = IntByteFhe::generate_lookup_table(&context, |val| val);
+    //     let int_byte_fhe = IntByteFhe::bootstrap_from_bool_byte(&bool_byte_fhe, &lut);
+    //
+    //     let decrypted_int = client_key.decrypt_without_padding(&int_byte_fhe.ct) as u8;
+    //     let decrypted_bool = u8::from(fhe_decrypt_byte(&client_key, &bool_byte_fhe));
+    //     assert_eq!(decrypted_int, decrypted_bool);
+    // }
+    //
+    // #[test]
+    // fn test_pbssub_wop_shortint_int_byte_boostrap_from_bool_byte_fhe_lut() {
+    //     let (client_key, context) = KEYS.clone();
+    //
+    //     let bool_byte = BoolByte::from(0b10110101);
+    //     let bool_byte_fhe = fhe_encrypt_byte(&client_key, &context, bool_byte);
+    //
+    //     let lut = IntByteFhe::generate_lookup_table(&context, |val| val + 3);
+    //     let int_byte_fhe = IntByteFhe::bootstrap_from_bool_byte(&bool_byte_fhe, &lut);
+    //
+    //     let decrypted = client_key.decrypt_without_padding(&int_byte_fhe.ct);
+    //     assert_eq!(decrypted, 0b10110101 + 3);
+    // }
+    //
+    // #[test]
+    // fn test_pbssub_wop_shortint_bool_byte_boostrap_from_int_byte_fhe() {
+    //     let (client_key, context) = KEYS.clone();
+    //
+    //     let int_byte_fhe = IntByteFhe::new(client_key.encrypt_without_padding(0b10110101), context);
+    //     let bool_byte_fhe = BoolByteFhe::bootstrap_from_int_byte(&int_byte_fhe);
+    //
+    //     let bool_byte = fhe_decrypt_byte(&client_key, &bool_byte_fhe);
+    //     assert_eq!(u8::from(bool_byte), 0b10110101);
+    // }
+    //
+    // #[test]
+    // fn test_pbssub_wob_shortint_perf() {
+    //     let start = Instant::now();
+    //     let (client_key, context) = KEYS.clone();
+    //     debug!("keys generated: {:?}", start.elapsed());
+    //
+    //     let start = Instant::now();
+    //     let mut b1 = client_key.encrypt_without_padding(1);
+    //     let b2 = client_key.encrypt_without_padding(3);
+    //     debug!(
+    //         "data encrypted: {:?}, dim: {}",
+    //         start.elapsed(),
+    //         b2.ct.data.len()
+    //     );
+    //
+    //     let start = Instant::now();
+    //     context.server_key.unchecked_add_assign(&mut b1, &b2);
+    //     debug!("add elapsed: {:?}", start.elapsed());
+    //
+    //     let lut = context
+    //         .wopbs_key
+    //         .generate_lut_without_padding(&b1, |a| a)
+    //         .into();
+    //     let start = Instant::now();
+    //     _ = context
+    //         .wopbs_key
+    //         .programmable_bootstrapping_without_padding(&b1, &lut);
+    //     debug!("bootstrap elapsed: {:?}", start.elapsed());
+    // }
+    //
+    // #[test]
+    // fn test_pbssub_wob_shortint_extract_bits() {
+    //     let start = Instant::now();
+    //     let (client_key, context) = KEYS.clone();
+    //     debug!("keys generated: {:?}", start.elapsed());
+    //
+    //     let cte1 = client_key.encrypt_without_padding(0b0110100);
+    //
+    //     let start = Instant::now();
+    //     let delta = (1u64 << (64 - 8));
+    //     let delta_log = DeltaLog(delta.ilog2() as usize);
+    //     let bit_cts = context
+    //         .wopbs_key
+    //         .extract_bits(delta_log, &cte1, ExtractedBitsCount(8));
+    //     debug!("bootstrap elapsed: {:?}", start.elapsed());
+    //
+    //     // let lwe_decryption_key = client_key.glwe_secret_key.as_lwe_secret_key();
+    //     let lwe_decryption_key = &client_key.lwe_secret_key;
+    //     for (i, bit_ct) in bit_cts.iter().enumerate() {
+    //         let decrypted = lwe_encryption::decrypt_lwe_ciphertext(&lwe_decryption_key, &bit_ct);
+    //         let decoded = decrypted.0 >> (64 - 8);
+    //         debug!("bit {}: {:b}", i, decoded);
+    //     }
+    // }
 }

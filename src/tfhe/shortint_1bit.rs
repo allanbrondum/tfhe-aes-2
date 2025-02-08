@@ -150,8 +150,6 @@ impl FheContext {
         res
     }
 
-
-
     /// Switches key and packs the given LWE ciphertexts in a GLWE ciphertext
     pub fn packing_keyswitch(&self, cts: &[&BitCt]) -> GlweCiphertextOwned<u64> {
         let in_data: Vec<u64> = cts
@@ -420,23 +418,19 @@ fn apply_selectors_rec<'a>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::sync::OnceLock;
+    use std::sync::{LazyLock, OnceLock};
     use tfhe::core_crypto::prelude::*;
 
-    static KEYS: OnceLock<(Arc<ClientKey>, FheContext)> = OnceLock::new();
+    static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(|| keys_impl());
 
-    fn generate_keys() -> (Arc<ClientKey>, FheContext) {
-        KEYS.get_or_init(|| {
-            let keys = FheContext::generate_keys();
-            (keys.0.into(), keys.1)
-        })
-        .clone()
-        .clone()
+    fn keys_impl() -> (Arc<ClientKey>, FheContext) {
+        let (client_key, context) = FheContext::generate_keys();
+        (client_key.into(), context)
     }
 
     #[test]
     fn test_packing_keyswitch() {
-        let (client_key, context) = generate_keys();
+        let (client_key, context) = KEYS.clone();
 
         let ct0_clear = 0;
         let ct1_clear = 1;
@@ -492,7 +486,7 @@ mod test {
     }
 
     fn test_bivariate_fn_2_impl(m0_clear: u64, m1_clear: u64) {
-        let (client_key, context) = generate_keys();
+        let (client_key, context) = KEYS.clone();
 
         let f = |index: u8| -> Cleartext<u64> {
             const TABLE: [u64; 4] = [1, 0, 0, 1];
@@ -520,7 +514,7 @@ mod test {
     }
 
     fn test_bivariate_fn_3_impl(m0_clear: u64, m1_clear: u64, m2_clear: u64) {
-        let (client_key, context) = generate_keys();
+        let (client_key, context) = KEYS.clone();
 
         let f = |index: u8| -> Cleartext<u64> {
             const TABLE: [u64; 8] = [1, 0, 0, 1, 0, 1, 1, 0];
