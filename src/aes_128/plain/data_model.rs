@@ -63,7 +63,7 @@ impl IndexMut<usize> for State {
 #[derive(Debug, Copy, Clone)]
 pub struct ColumnView<'a>(usize, &'a [Word; 4]);
 
-impl<'a> ColumnView<'a> {
+impl ColumnView<'_> {
     pub fn to_word(&self) -> Word {
         let mut col: Word = Default::default();
         for i in 0..4 {
@@ -76,7 +76,7 @@ impl<'a> ColumnView<'a> {
 #[derive(Debug)]
 pub struct ColumnViewMut<'a>(usize, &'a mut [Word; 4]);
 
-impl<'a> ColumnViewMut<'a> {
+impl ColumnViewMut<'_> {
     pub fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
         (0..4).map(|i| self.1[i][self.0])
     }

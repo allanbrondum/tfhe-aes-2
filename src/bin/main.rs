@@ -63,7 +63,7 @@ fn run_client_server_aes_scenario<Bit, CK>(
         .collect();
     let blocks: Vec<_> = blocks_clear
         .iter()
-        .map(|block| fhe_encryption::fhe_encrypt_byte_array(client_key, &block))
+        .map(|block| fhe_encryption::fhe_encrypt_byte_array(client_key, block))
         .collect();
     debug!("aes key and block fhe encrypted");
 

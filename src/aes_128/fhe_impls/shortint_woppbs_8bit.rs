@@ -37,7 +37,7 @@ impl ByteT for Byte<BitCt> {
 impl Byte<BitCt> {
     fn bootstrap_with_lut(&self, lut: &ShortintWopbsLUT) -> Self {
         let start = Instant::now();
-        let int_byte = IntByte::bootstrap_from_bits(&self, &lut);
+        let int_byte = IntByte::bootstrap_from_bits(self, lut);
         debug!("boot int {:?}", start.elapsed());
 
         let start = Instant::now();

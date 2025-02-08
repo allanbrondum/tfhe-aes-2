@@ -28,7 +28,7 @@ const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
     glwe_dimension: GlweDimension(4),
     polynomial_size: PolynomialSize(512),
     lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-        3.5539902359442825e-06,
+        3.5539902359442825e-6,
     )),
     glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
         2.845267479601915e-15,
@@ -344,8 +344,8 @@ fn keyswitch_and_pack_ciphertext_list(
         CiphertextModulus::new_native(),
     );
     lwe_packing_keyswitch::keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
-        &packing_keyswitch_key,
-        &ciphertext_list,
+        packing_keyswitch_key,
+        ciphertext_list,
         &mut out,
     );
     out
@@ -387,10 +387,10 @@ pub fn calculate_multivariate_function(
     apply_selectors_rec(context, bit_cts, &mv_test_vector.test_vectors)
 }
 
-fn apply_selectors_rec<'a>(
+fn apply_selectors_rec(
     context: &FheContext,
     selectors: &[&BitCt],
-    test_vectors: &'a [TestVector],
+    test_vectors: &[TestVector],
 ) -> BitCt {
     let (selector, selectors_rec) = selectors.split_last().expect("at least one selector");
 
@@ -421,7 +421,7 @@ mod test {
     use super::*;
     use std::sync::LazyLock;
 
-    static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(|| keys_impl());
+    static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(keys_impl);
 
     fn keys_impl() -> (Arc<ClientKey>, FheContext) {
         let (client_key, context) = FheContext::generate_keys();

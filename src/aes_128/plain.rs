@@ -31,8 +31,8 @@ fn substitute(byte: u8) -> u8 {
 }
 
 fn xor_state(state: &mut State, key: &[Word; 4]) {
-    for j in 0..4 {
-        state.column_mut(j).bitxor_assign(key[j]);
+    for (j, key) in key.iter().enumerate() {
+        state.column_mut(j).bitxor_assign(*key);
     }
 }
 
@@ -132,9 +132,7 @@ pub fn key_schedule(key_slice: &Key) -> [Word; 44] {
         );
     }
 
-    for i in 0..4 {
-        expanded_key[i] = key[i];
-    }
+    expanded_key[..4].copy_from_slice(&key);
 
     for i in 4..44 {
         if i % 4 == 0 {

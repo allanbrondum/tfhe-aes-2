@@ -24,7 +24,7 @@ pub fn fhe_encrypt_byte_array<const N: usize, Bit: Send + Sync, CK: ClientKeyT<B
     util::par_collect_array(
         array
             .par_iter()
-            .map(|&byte| fhe_encrypt_byte(client_key, byte.into())),
+            .map(|&byte| fhe_encrypt_byte(client_key, byte)),
     )
 }
 
@@ -55,7 +55,7 @@ pub fn fhe_decrypt_byte_array<const N: usize, Bit: Send + Sync, CK: ClientKeyT<B
     util::par_collect_array(
         array
             .par_iter()
-            .map(|byte| fhe_decrypt_byte(client_key, byte).into()),
+            .map(|byte| fhe_decrypt_byte(client_key, byte)),
     )
 }
 

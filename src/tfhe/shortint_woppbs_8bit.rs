@@ -36,17 +36,16 @@ use tracing::trace;
 ///     - 7 :   2, 10,  785,    6,  7,     8,  2,     4,  6,     3, 12,  12143, 5.4e-20
 ///     ...
 /// ```
-
 fn params() -> ShortintParameterSet {
     let wopbs_params = WopbsParameters {
         lwe_dimension: LweDimension(785),
         glwe_dimension: GlweDimension(2),
         polynomial_size: PolynomialSize(1024),
         lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            1.5140301927925663e-05,
+            1.5140301927925663e-5,
         )),
         glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568513645324585951,
+            0.00000000000000022148688116005568,
         )),
         pbs_base_log: DecompositionBaseLog(7),
         pbs_level: DecompositionLevelCount(6),
@@ -55,7 +54,7 @@ fn params() -> ShortintParameterSet {
         pfks_level: DecompositionLevelCount(3),
         pfks_base_log: DecompositionBaseLog(12),
         pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568513645324585951,
+            0.00000000000000022148688116005568,
         )),
         cbs_level: DecompositionLevelCount(4),
         cbs_base_log: DecompositionBaseLog(6),
@@ -151,6 +150,7 @@ pub fn decode_bit(encoding: Plaintext<u64>) -> Cleartext<u64> {
 impl BitXorAssign<&BitCt> for BitCt {
     fn bitxor_assign(&mut self, rhs: &Self) {
         lwe_linear_algebra::lwe_ciphertext_add_assign(&mut self.ct, &rhs.ct);
+        #[allow(clippy::suspicious_op_assign_impl)]
         self.set_noise_level(self.noise_level + rhs.noise_level);
     }
 }
@@ -310,7 +310,7 @@ impl ClientKeyT<BitCt> for ClientKey {
 
         let ct = ShortintEngine::with_thread_local_mut(|engine| {
             lwe_encryption::allocate_and_encrypt_new_lwe_ciphertext(
-                &encryption_lwe_sk,
+                encryption_lwe_sk,
                 encode_bit(bit),
                 encryption_noise_distribution,
                 self.0.parameters.ciphertext_modulus(),
@@ -360,7 +360,7 @@ mod test {
     use crate::aes_128::fhe_encryption::{fhe_decrypt_byte, fhe_encrypt_byte};
     use std::sync::{Arc, LazyLock};
 
-    static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(|| keys_impl());
+    static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(keys_impl);
 
     fn keys_impl() -> (Arc<ClientKey>, FheContext) {
         let (client_key, context) = FheContext::generate_keys();
@@ -466,10 +466,10 @@ mod test {
         let (client_key, context) = KEYS.clone();
 
         let int_byte_fhe = IntByte::new(client_key.0.encrypt_without_padding(0b10110101), context);
-        let bool_byte_fhe = Byte::extract_bits_from_int_byte(&int_byte_fhe);
+        let byte_fhe = Byte::extract_bits_from_int_byte(&int_byte_fhe);
 
-        let bool_byte = fhe_decrypt_byte(client_key.as_ref(), &bool_byte_fhe);
-        assert_eq!(u8::from(bool_byte), 0b10110101);
+        let byte = fhe_decrypt_byte(client_key.as_ref(), &byte_fhe);
+        assert_eq!(byte, 0b10110101);
     }
 
     // #[test]
