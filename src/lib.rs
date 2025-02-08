@@ -5,3 +5,4 @@ pub mod aes_128;
 /// All build on `tfhe-rs`
 pub mod tfhe;
 mod util;
+pub mod logger;

@@ -19,13 +19,13 @@ fn main() {
     //     block[0..8].copy_from_slice(&iv);
     //     block[8..16].copy_from_slice(&counter.to_be_bytes());
     //
-    //     println!("block: {}", hex::encode(&block));
+    //     debug!("block: {}", hex::encode(&block));
     //
     //     let encrypted = encrypt_plain(key, block);
-    //     println!("encrypted plain: {}", hex::encode(&encrypted));
+    //     debug!("encrypted plain: {}", hex::encode(&encrypted));
     //
     //     let encrypted = encrypt_aes_lib(key, block);
-    //     println!("encrypted aes lib: {}", hex::encode(&encrypted));
+    //     debug!("encrypted aes lib: {}", hex::encode(&encrypted));
 }
 //
 // fn encrypt_plain(key: Key, block: Block) -> Block {

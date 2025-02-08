@@ -20,6 +20,7 @@ use tfhe::shortint::ciphertext::NoiseLevel;
 use tfhe::shortint::engine::ShortintEngine;
 use tfhe::shortint::server_key::ShortintBootstrappingKey;
 use tfhe::shortint::{CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus};
+use tracing::debug;
 
 const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
     lwe_dimension: LweDimension(692),
@@ -136,6 +137,7 @@ impl FheContext {
     /// when bootstrapping another ciphertext.
     pub fn test_vector_from_ciphertexts(&self, bit0: &BitCt, bit1: &BitCt) -> TestVector {
         let start = Instant::now();
+        // todo optimize encryption
 
         let res = TestVector(test_vector_from_ciphertexts(
             &self.packing_keyswitch_key.as_view(),
@@ -144,9 +146,11 @@ impl FheContext {
             &bit1.ct.ct,
         ));
 
-        println!("test vector from ciphertexts {:?}", start.elapsed());
+        debug!("test vector from ciphertexts {:?}", start.elapsed());
         res
     }
+
+
 
     /// Switches key and packs the given LWE ciphertexts in a GLWE ciphertext
     pub fn packing_keyswitch(&self, cts: &[&BitCt]) -> GlweCiphertextOwned<u64> {
@@ -194,7 +198,7 @@ impl FheContext {
             );
         });
 
-        println!("bootstrap {:?}", start.elapsed());
+        debug!("bootstrap {:?}", start.elapsed());
 
         ct.ct
             .set_noise_level(NoiseLevel::NOMINAL, self.server_key.max_noise_level);
@@ -309,6 +313,8 @@ fn test_vector_from_ciphertexts(
     let box_size = polynomial_size.0 / 2;
     let half_box_size = box_size / 2;
     // todo reuse buffers
+
+    // todo
     let list_data: Vec<u64> = iter::repeat(ct0)
         .take(half_box_size)
         .chain(iter::repeat(ct1).take(box_size))
@@ -316,6 +322,7 @@ fn test_vector_from_ciphertexts(
         .flat_map(|ct| ct.as_ref())
         .copied()
         .collect();
+
     let mut ciphertext_list = LweCiphertextListOwned::from_container(
         list_data,
         packing_keyswitch_key
@@ -366,7 +373,7 @@ pub fn generate_multivariate_test_vector(
         .map(|val| context.test_vector_from_cleartext_fn(|bit_val| f(val + bit_val.0 as u8)))
         .collect();
 
-    println!("generated mv test vector {:?}", start.elapsed());
+    debug!("generated mv test vector {:?}", start.elapsed());
 
     MultivariateTestVector { bits, test_vectors }
 }
@@ -401,7 +408,7 @@ fn apply_selectors_rec<'a>(
             .chunks(2)
             .map(|tv| context.test_vector_from_ciphertexts(&tv[0], &tv[1]))
             .collect();
-        println!(
+        debug!(
             "applied mv selectors {:?}, missing {} levels",
             start.elapsed(),
             selectors_rec.len()

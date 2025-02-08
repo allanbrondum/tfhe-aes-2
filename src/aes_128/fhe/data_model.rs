@@ -1,42 +1,32 @@
 use crate::util;
+use rayon::iter::ParallelBridge;
 use rayon::iter::ParallelIterator;
-use rayon::iter::{IntoParallelRefIterator, ParallelBridge};
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
+use std::mem;
 use std::ops::{BitAnd, BitXor, BitXorAssign, Index, IndexMut, ShlAssign};
-use std::time::Instant;
-use std::{fmt, mem};
-use tfhe::core_crypto::algorithms::{lwe_encryption, lwe_linear_algebra};
-use tfhe::core_crypto::entities::{
-    lwe_ciphertext, LweCiphertextCreationMetadata, LweCiphertextOwned,
-};
-use tfhe::core_crypto::prelude::{
-    CiphertextCount, CiphertextModulus, ContiguousEntityContainer, CreateFrom, DeltaLog,
-    ExtractedBitsCount, LweCiphertextListCreationMetadata, LweCiphertextListOwned, Plaintext,
-};
-use tfhe::shortint;
-use tfhe::shortint::ciphertext::{Degree, NoiseLevel};
-use tfhe::shortint::engine::ShortintEngine;
-use tfhe::shortint::wopbs::ShortintWopbsLUT;
-use tfhe::shortint::PBSOrder;
+use tfhe::core_crypto::entities::Cleartext;
+use tfhe::core_crypto::prelude::ContiguousEntityContainer;
 
-pub trait BitT: BitXorAssign<&Self> {}
+pub trait BitT:
+    for<'a> BitXorAssign<&'a Self> + Send + Sync + Clone + Debug + Default + Sized + 'static
+{
+    fn trivial(val: Cleartext<u8>) -> Self;
+}
+
+pub trait ByteT: Sized {
+    /// Bootstrap to reset noise
+    fn bootstrap(&self) -> Self;
+
+    /// Perform AES SubBytes on this byte while also resetting noise
+    fn aes_substitute(&self) -> Self;
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct Byte<Bit>([Bit; 8]);
 
 impl<Bit> Byte<Bit> {
-    // pub fn trivial(val: u8, context: FheContext) -> Self {
-    //     let mut byte = Byte::default();
-    //     for i in 0..8 {
-    //         byte[i] = BoolFhe::trivial(0 != (val & (0x80 >> i)), context.clone());
-    //     }
-    //     byte
-    // }
-
-    pub fn shl_assign_1(&mut self) -> Bit {
-        let ret = mem::take(&mut self.0[0]);
-        self.shl_assign(1);
-        ret
+    pub fn new(bits: [Bit; 8]) -> Self {
+        Self(bits)
     }
 
     pub fn bits(&self) -> impl Iterator<Item = &Bit> + '_ {
@@ -45,6 +35,22 @@ impl<Bit> Byte<Bit> {
 
     pub fn bits_mut(&mut self) -> impl Iterator<Item = &mut Bit> + '_ {
         self.0.iter_mut()
+    }
+}
+
+impl<Bit: BitT> Byte<Bit> {
+    pub fn trivial(val: u8) -> Self {
+        let mut byte = Byte::default();
+        for i in 0..8 {
+            byte[i] = Bit::trivial(if 0 == (val & (0x80 >> i)) { Cleartext(0) } else { Cleartext(1) });
+        }
+        byte
+    }
+
+    pub fn shl_assign_1(&mut self) -> Bit {
+        let ret = mem::take(&mut self.0[0]);
+        self.shl_assign(1);
+        ret
     }
 }
 
@@ -62,7 +68,7 @@ impl<Bit> IndexMut<usize> for Byte<Bit> {
     }
 }
 
-impl<Bit> ShlAssign<usize> for Byte<Bit> {
+impl<Bit: BitT> ShlAssign<usize> for Byte<Bit> {
     fn shl_assign(&mut self, rhs: usize) {
         util::shl_array(&mut self.0, rhs);
     }
@@ -90,9 +96,13 @@ impl<Bit: BitT> BitXor for Byte<Bit> {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct Word<Bit>(pub [Byte<Bit>; 4]);
+pub struct Word<Bit>([Byte<Bit>; 4]);
 
 impl<Bit> Word<Bit> {
+    pub fn new(bytes: [Byte<Bit>; 4]) -> Self {
+        Self(bytes)
+    }
+
     pub fn bytes(&self) -> impl Iterator<Item = &Byte<Bit>> + '_ {
         self.0.iter()
     }
@@ -155,7 +165,7 @@ pub type Block<Bit> = [Byte<Bit>; 16];
 #[derive(Debug, Default)]
 pub struct State<Bit>([Word<Bit>; 4]);
 
-impl<Bit> State<Bit> {
+impl<Bit: BitT> State<Bit> {
     pub fn from_array(block: [Byte<Bit>; 16]) -> Self {
         let mut this = Self::default();
         for (i, byte) in block.into_iter().enumerate() {
@@ -212,17 +222,15 @@ impl<Bit> IndexMut<usize> for State<Bit> {
 #[derive(Debug, Copy, Clone)]
 pub struct ColumnViewFhe<'a, Bit>(usize, &'a [Word<Bit>; 4]);
 
-impl<Bit> ColumnViewFhe<'_, Bit> {
+impl<Bit: BitT> ColumnViewFhe<'_, Bit> {
     pub fn bytes(&self) -> impl Iterator<Item = &Byte<Bit>> + '_ {
         (0..4).map(|i| &self.1[i][self.0])
     }
 
     pub fn clone_to_word(&self) -> Word<Bit> {
-        let mut col: Word<Bit> = Default::default();
-        for i in 0..4 {
-            col.0[i] = self.1[i][self.0].clone();
-        }
-        col
+        Word(util::collect_array(
+            (0..4).map(|i| self.1[i][self.0].clone()),
+        ))
     }
 }
 
@@ -237,7 +245,7 @@ impl<Bit> Index<usize> for ColumnViewFhe<'_, Bit> {
 #[derive(Debug)]
 pub struct ColumnViewMutFhe<'a, Bit>(usize, &'a mut [Word<Bit>; 4]);
 
-impl<Bit> ColumnViewMutFhe<'_, Bit> {
+impl<Bit: BitT> ColumnViewMutFhe<'_, Bit> {
     pub fn bytes(&self) -> impl Iterator<Item = &Byte<Bit>> + '_ {
         (0..4).map(|i| &self.1[i][self.0])
     }
