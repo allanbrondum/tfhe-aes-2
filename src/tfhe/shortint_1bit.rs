@@ -147,11 +147,15 @@ impl FheContext {
         &self,
         f: impl Fn(Cleartext<u64>) -> Cleartext<u64>,
     ) -> TestVector {
-        TestVector(test_vector_from_cleartext_fn(
+        let start = Instant::now();
+        let res = TestVector(test_vector_from_cleartext_fn(
             self.server_key.bootstrapping_key.polynomial_size(),
             self.server_key.bootstrapping_key.glwe_size(),
             f,
-        ))
+        ));
+
+        debug!("test vector from cleartext fn {:?}", start.elapsed());
+        res
     }
 
     /// Create test vector from two ciphertexts. Can be used to select one of the ciphertexts
@@ -331,26 +335,97 @@ fn test_vector_from_ciphertexts(
     // Create ciphertext list to be transformed to test vector
     let box_size = polynomial_size.0 / 2;
     let half_box_size = box_size / 2;
-    // todo reuse buffers
 
-    // todo
-    let list_data: Vec<u64> = iter::repeat(ct0)
-        .take(half_box_size)
-        .chain(iter::repeat(ct1).take(box_size))
-        .chain(iter::repeat(ct0).take(box_size - half_box_size))
-        .flat_map(|ct| ct.as_ref())
-        .copied()
-        .collect();
-
-    let ciphertext_list = LweCiphertextListOwned::from_container(
-        list_data,
-        packing_keyswitch_key
-            .input_key_lwe_dimension()
-            .to_lwe_size(),
+    // Test vector that will contain ct0 and ct1 as monomial coefficients in two boxes (like in test_vector_from_cleartext_fn)
+    let mut test_vector = GlweCiphertextOwned::new(
+        0,
+        packing_keyswitch_key.output_glwe_size(),
+        packing_keyswitch_key.output_polynomial_size(),
         CiphertextModulus::new_native(),
     );
 
-    keyswitch_and_pack_ciphertext_list(packing_keyswitch_key, &ciphertext_list.as_view())
+    let mut buffer = GlweCiphertext::new(
+        0,
+        packing_keyswitch_key.output_glwe_size(),
+        packing_keyswitch_key.output_polynomial_size(),
+        CiphertextModulus::new_native(),
+    );
+
+    lwe_packing_keyswitch::keyswitch_lwe_ciphertext_into_glwe_ciphertext(
+        packing_keyswitch_key,
+        ct0,
+        &mut buffer,
+    );
+
+    for _ in 0..half_box_size {
+        slice_algorithms::slice_wrapping_add_assign(test_vector.as_mut(), buffer.as_ref());
+
+        buffer
+            .as_mut_polynomial_list()
+            .iter_mut()
+            .for_each(|mut poly| {
+                polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign(
+                    &mut poly,
+                    MonomialDegree(1),
+                );
+            });
+    }
+
+    buffer
+        .as_mut_polynomial_list()
+        .iter_mut()
+        .for_each(|mut poly| {
+            polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign(
+                &mut poly,
+                MonomialDegree(polynomial_size.0 - half_box_size - half_box_size),
+            );
+        });
+
+    for _ in (polynomial_size.0 - half_box_size)..polynomial_size.0 {
+        slice_algorithms::slice_wrapping_add_assign(test_vector.as_mut(), buffer.as_ref());
+
+        buffer
+            .as_mut_polynomial_list()
+            .iter_mut()
+            .for_each(|mut poly| {
+                polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign(
+                    &mut poly,
+                    MonomialDegree(1),
+                );
+            });
+    }
+
+    lwe_packing_keyswitch::keyswitch_lwe_ciphertext_into_glwe_ciphertext(
+        packing_keyswitch_key,
+        ct1,
+        &mut buffer,
+    );
+
+    buffer
+        .as_mut_polynomial_list()
+        .iter_mut()
+        .for_each(|mut poly| {
+            polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign(
+                &mut poly,
+                MonomialDegree(half_box_size),
+            );
+        });
+
+    for _ in half_box_size..(polynomial_size.0 - half_box_size) {
+        slice_algorithms::slice_wrapping_add_assign(test_vector.as_mut(), buffer.as_ref());
+
+        buffer
+            .as_mut_polynomial_list()
+            .iter_mut()
+            .for_each(|mut poly| {
+                polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign(
+                    &mut poly,
+                    MonomialDegree(1),
+                );
+            });
+    }
+
+    test_vector
 }
 
 fn keyswitch_and_pack_ciphertext_list(
@@ -439,7 +514,9 @@ fn apply_selectors_rec(
 #[cfg(test)]
 pub mod test {
     use super::*;
+    use crate::logger;
     use std::sync::LazyLock;
+    use tracing::metadata::LevelFilter;
 
     pub static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(keys_impl);
 
@@ -527,6 +604,8 @@ pub mod test {
 
     #[test]
     fn test_bivariate_fn_3() {
+        logger::init(LevelFilter::DEBUG);
+
         test_bivariate_fn_3_impl(0, 0, 0);
         test_bivariate_fn_3_impl(0, 1, 1);
         test_bivariate_fn_3_impl(1, 0, 1);
