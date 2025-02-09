@@ -83,7 +83,6 @@ fn params_lvl_1() -> ShortintParameterSet {
     ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
 }
 
-
 /// Parameters created from
 ///
 /// ```text
@@ -332,7 +331,6 @@ impl FheContext {
     pub fn generate_keys_lvl_11() -> (ClientKey, Self) {
         Self::generate_keys_with_params(params_lvl_11())
     }
-
 
     fn generate_keys_with_params(params: ShortintParameterSet) -> (ClientKey, Self) {
         let (shortint_client_key, server_key) = shortint::gen_keys(params);
