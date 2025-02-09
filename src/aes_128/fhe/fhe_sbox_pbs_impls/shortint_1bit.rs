@@ -1,10 +1,12 @@
 //! Implementation of AES-128 using 1 bit `shortint`
 
-use crate::aes_128::fhe_sbox_pbs::data_model::{BitT, Byte, ByteT};
+use crate::aes_128::fhe::data_model::Byte;
 use std::array;
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
+use crate::aes_128::fhe::data_model::BitT;
+use crate::aes_128::fhe::fhe_sbox_pbs::ByteT;
 use crate::aes_128::SBOX;
 use crate::tfhe::shortint_1bit;
 use crate::tfhe::shortint_1bit::{BitCt, MultivariateTestVector, TestVector};
@@ -24,7 +26,7 @@ impl ByteT for Byte<BitCt> {
         });
     }
 
-    fn aes_substitute(&self) -> Self {
+    fn sbox_substitute(&self) -> Self {
         let context = &self.0[0].context;
 
         static SBOX_LUT: OnceLock<[MultivariateTestVector; 8]> = OnceLock::new();

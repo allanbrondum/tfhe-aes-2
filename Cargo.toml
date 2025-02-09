@@ -17,6 +17,7 @@ tracing = { version = "0.1.40" }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "registry", "fmt", "ansi"] }
 clap = { version = "4.5.28", features = ["derive"] }
 anyhow = "1.0.95"
+itertools = "0.14.0"
 
 [features]
 long_running_tests = []

@@ -2,13 +2,8 @@
 
 /// Wrapper around `aes` crate used for reference
 pub mod aes_lib;
-/// Data model and logic for AES-128 encryption executed in an FHE context. Based on XOR's of individual bits
-/// and using programmable bootstrap for SubBytes. Generic over the TFHE model used.
-pub mod fhe_sbox_pbs;
-/// Utilities to encrypt clear data (e.g. keys and blocks) into FHE data model
-pub mod fhe_encryption;
-/// FHE AES-128 implementations using different TFHE models
-pub mod fhe_impls;
+/// FHE implementation of AES-128 encryption
+pub mod fhe;
 /// Plain AES-128 implementation used for testing reference (e.g. running less than 10 rounds)
 pub mod plain;
 /// Utilities for implementing tests of AES-128
@@ -42,3 +37,20 @@ static SBOX: [u8; 256] = [
 static RC: [u8; 11] = [
     0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36,
 ];
+
+/// Multiplication in F_2[X]/(X^8 + X^4 + X^3 + X + 1)
+fn gf_256_mul(mut a: u8, mut b: u8) -> u8 {
+    let mut res = 0u8;
+    for _ in 0..8 {
+        if b & 1 == 1 {
+            res ^= a
+        }
+        let high_bit = a & 0x80;
+        a <<= 1;
+        if high_bit != 0x80 {
+            a ^= 0x1b;
+        }
+        b >>= 1;
+    }
+    res
+}

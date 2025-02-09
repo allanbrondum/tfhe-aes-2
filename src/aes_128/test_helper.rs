@@ -1,8 +1,11 @@
 use std::time::Instant;
 
 use crate::aes_128;
-use crate::aes_128::fhe_sbox_pbs::data_model::{BitT, Block, Byte, ByteT, Word};
-use crate::aes_128::{aes_lib, fhe_sbox_pbs, fhe_encryption, plain, ROUNDS};
+use crate::aes_128::fhe::data_model::BitT;
+use crate::aes_128::fhe::data_model::{Block, Byte, Word};
+use crate::aes_128::fhe::fhe_sbox_pbs::ByteT;
+use crate::aes_128::fhe::{fhe_encryption, fhe_sbox_pbs};
+use crate::aes_128::{aes_lib, plain, ROUNDS};
 use crate::tfhe::{ClientKeyT, ContextT};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;

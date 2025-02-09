@@ -1,6 +1,6 @@
 //! Model with each ciphertext representing 8 bits. Build on `tfhe-rs` `shortint` module with WoP-PBS
 
-use crate::aes_128::fhe_sbox_pbs::data_model::{BitT, Byte};
+use crate::aes_128::fhe::data_model::Byte;
 use crate::tfhe::{ClientKeyT, ContextT};
 use crate::util;
 use rayon::iter::ParallelIterator;
@@ -13,6 +13,7 @@ use tfhe::core_crypto::prelude::*;
 use tfhe::shortint;
 use tfhe::shortint::ciphertext::{Degree, NoiseLevel};
 
+use crate::aes_128::fhe::data_model::BitT;
 use crate::tfhe::engine::ShortintEngine;
 use tfhe::shortint::wopbs::{ShortintWopbsLUT, WopbsKey};
 use tfhe::shortint::{
@@ -349,7 +350,7 @@ fn wrap_in_shortint(ct: FullWidthCiphertext) -> shortint::Ciphertext {
 pub mod test {
     use super::*;
 
-    use crate::aes_128::fhe_encryption::{decrypt_byte, encrypt_byte};
+    use crate::aes_128::fhe::fhe_encryption::{decrypt_byte, encrypt_byte};
     use std::sync::{Arc, LazyLock};
 
     pub static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(keys_impl);

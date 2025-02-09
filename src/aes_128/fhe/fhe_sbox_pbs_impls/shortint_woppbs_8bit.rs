@@ -1,6 +1,6 @@
 //! Implementation of AES-128 using 8 bit `shortint` WoP-PBS
 
-use crate::aes_128::fhe_sbox_pbs::data_model::{Byte, ByteT};
+use crate::aes_128::fhe::data_model::Byte;
 use crate::aes_128::SBOX;
 use crate::tfhe::shortint_woppbs_8bit::*;
 
@@ -8,6 +8,7 @@ use rayon::iter::ParallelIterator;
 
 use std::sync::OnceLock;
 
+use crate::aes_128::fhe::fhe_sbox_pbs::ByteT;
 use tfhe::shortint::wopbs::ShortintWopbsLUT;
 
 impl ByteT for Byte<BitCt> {
@@ -20,7 +21,7 @@ impl ByteT for Byte<BitCt> {
         *self = self.bootstrap_with_lut(context, lut);
     }
 
-    fn aes_substitute(&self) -> Self {
+    fn sbox_substitute(&self) -> Self {
         let context = &self.bits().find_first(|_| true).unwrap().context;
 
         static SBOX_LUT: OnceLock<ShortintWopbsLUT> = OnceLock::new();

@@ -1,7 +1,7 @@
 pub mod data_model;
 
 use crate::aes_128::plain::data_model::{State, Word};
-use crate::aes_128::{Block, Key};
+use crate::aes_128::{gf_256_mul, Block, Key};
 
 static SBOX: [u8; 256] = [
     0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -46,23 +46,6 @@ fn shift_rows(state: &mut State) {
     for (i, row) in state.rows_mut().enumerate() {
         *row = row.rotate_left(i);
     }
-}
-
-/// Multiplication in F_2[X]/(X^8 + X^4 + X^3 + X + 1)
-fn gf_256_mul(mut a: u8, mut b: u8) -> u8 {
-    let mut res = 0u8;
-    for _ in 0..8 {
-        if b & 1 == 1 {
-            res ^= a
-        }
-        let high_bit = a & 0x80;
-        a <<= 1;
-        if high_bit != 0x80 {
-            a ^= 0x1b;
-        }
-        b >>= 1;
-    }
-    res
 }
 
 fn mix_columns(state: &mut State) {

@@ -13,14 +13,6 @@ pub trait BitT:
 {
 }
 
-pub trait ByteT: Sized {
-    /// Bootstrap to reset noise
-    fn bootstrap_assign(&mut self);
-
-    /// Perform AES SubBytes on this byte while also resetting noise
-    fn aes_substitute(&self) -> Self;
-}
-
 /// Byte represented as individual bits
 #[derive(Debug, Clone)]
 pub struct Byte<Bit>(pub [Bit; 8]);
@@ -90,6 +82,15 @@ impl<Bit: BitT> BitXor for Byte<Bit> {
 
     fn bitxor(mut self, rhs: Self) -> Self::Output {
         self.bitxor_assign(&rhs);
+        self
+    }
+}
+
+impl<Bit: BitT> BitXor<&Self> for Byte<Bit> {
+    type Output = Byte<Bit>;
+
+    fn bitxor(mut self, rhs: &Self) -> Self::Output {
+        self.bitxor_assign(rhs);
         self
     }
 }

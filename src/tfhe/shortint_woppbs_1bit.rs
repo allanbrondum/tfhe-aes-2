@@ -15,7 +15,7 @@ use tfhe::shortint::ciphertext::{Degree, NoiseLevel};
 
 use crate::tfhe::engine::ShortintEngine;
 use crate::util;
-use tfhe::shortint::wopbs::{ WopbsKey, WopbsLUTBase};
+use tfhe::shortint::wopbs::{WopbsKey, WopbsLUTBase};
 use tfhe::shortint::{
     CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus, ShortintParameterSet,
     WopbsParameters,
@@ -36,7 +36,8 @@ use tracing::debug;
 /// - 7 :   4,  9,  661,    3, 12,     6,  2,     2,  9,     2, 16,    353, 5.3e-20
 /// ...
 /// ```
-fn params_() -> ShortintParameterSet { // todo
+fn params_() -> ShortintParameterSet {
+    // todo
     let wopbs_params = WopbsParameters {
         lwe_dimension: LweDimension(661),
         glwe_dimension: GlweDimension(4),
@@ -438,7 +439,7 @@ fn generate_multivariate_luts(
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use std::{array,};
+    use std::array;
 
     use crate::{logger, util};
     use std::sync::{Arc, LazyLock};
@@ -519,9 +520,7 @@ pub mod test {
     fn test_multivariate_parity_fn_impl(bits: usize, byte: u8) {
         let (client_key, context) = KEYS.clone();
 
-        let parity_fn = |val: u8| -> u8 {
-            util::byte_to_bits(val).iter().sum::<u8>() % 2
-        };
+        let parity_fn = |val: u8| -> u8 { util::byte_to_bits(val).iter().sum::<u8>() % 2 };
 
         // println!("parity {}", parity_fn(byte).0);
 
@@ -531,7 +530,11 @@ pub mod test {
         // println!("bits {:?}", bits_cl);
 
         let tv = context.generate_lookup_table(bits, 1, parity_fn);
-        let d = context.circuit_bootstrap(&bit_cts.each_ref()[8 - bits..], &tv).into_iter().next().expect("one bit");
+        let d = context
+            .circuit_bootstrap(&bit_cts.each_ref()[8 - bits..], &tv)
+            .into_iter()
+            .next()
+            .expect("one bit");
         let d = context.extract_bit_from_dual_ciphertext(&d);
 
         assert_eq!(client_key.decrypt(&d).0 as u8, parity_fn(byte));

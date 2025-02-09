@@ -4,10 +4,12 @@ use clap::{Parser, ValueEnum};
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
 use std::time::Instant;
-use tfhe_aes::aes_128::fhe_sbox_pbs::data_model::{BitT, Block, Byte, ByteT, Word};
-use tfhe_aes::aes_128::{aes_lib, fhe_sbox_pbs, fhe_encryption};
+use tfhe_aes::aes_128::fhe::data_model::{BitT, Block, Byte, Word};
+use tfhe_aes::aes_128::{aes_lib, fhe::fhe_encryption, fhe::fhe_sbox_gal_mul_pbs};
 use tfhe_aes::{aes_128, logger};
 
+use tfhe_aes::aes_128::fhe::fhe_sbox_pbs;
+use tfhe_aes::aes_128::fhe::fhe_sbox_pbs::ByteT;
 use tfhe_aes::tfhe::{
     shortint_1bit, shortint_woppbs_1bit, shortint_woppbs_8bit, ClientKeyT, ContextT,
 };

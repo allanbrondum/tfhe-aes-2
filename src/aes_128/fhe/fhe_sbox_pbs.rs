@@ -1,24 +1,32 @@
 //! Generic implementation based on one ciphertext representing one bit. This means that "xor" can be
-//! evaluated and a simple addition of ciphertext. XBOX byte substitution is calculated via programmable bootstrapping.
+//! evaluated and a simple addition of ciphertext. SBOX byte substitution is calculated via programmable bootstrapping.
 
-pub mod data_model;
-
-use crate::aes_128::fhe_sbox_pbs::data_model::{BitT, Block, Byte, ByteT, State, Word};
+use crate::aes_128::fhe::data_model::{BitT, Block};
+use crate::aes_128::fhe::data_model::{Byte, State, Word};
 use crate::aes_128::{RC, ROUNDS};
+use crate::tfhe::ContextT;
 use crate::util;
 use rayon::iter::IndexedParallelIterator;
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use std::array;
+use std::fmt::Debug;
+use std::ops::BitXorAssign;
+use tracing::debug;
 
-use crate::tfhe::ContextT;
-use tracing::{debug};
+pub trait ByteT: Sized {
+    /// Bootstrap to reset noise
+    fn bootstrap_assign(&mut self);
+
+    /// Perform AES SubBytes on this byte while also resetting noise
+    fn sbox_substitute(&self) -> Self;
+}
 
 fn substitute<Bit>(byte: &Byte<Bit>) -> Byte<Bit>
 where
     Byte<Bit>: ByteT,
 {
-    byte.aes_substitute()
+    byte.sbox_substitute()
 }
 
 fn xor_state<Bit: BitT>(state: &mut State<Bit>, key: &[Word<Bit>; 4]) {
