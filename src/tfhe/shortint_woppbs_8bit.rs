@@ -1,6 +1,6 @@
 //! Model with each ciphertext representing 8 bits. Build on `tfhe-rs` `shortint` module with WoP-PBS
 
-use crate::aes_128::fhe::data_model::{BitT, Byte};
+use crate::aes_128::fhe_sub_pbs::data_model::{BitT, Byte};
 use crate::tfhe::{ClientKeyT, ContextT};
 use crate::util;
 use rayon::iter::ParallelIterator;

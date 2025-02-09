@@ -1,29 +1,29 @@
 //! Implementation of AES-128 using 1 bit `shortint` WoP-PBS
 
-use crate::aes_128::fhe::data_model::{BitT, Byte, ByteT};
+use crate::aes_128::fhe_sub_pbs::data_model::{BitT, Byte, ByteT};
 use crate::aes_128::SBOX;
 use crate::tfhe::shortint_woppbs_1bit::*;
-use std::array;
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::util;
 use std::sync::OnceLock;
-use tfhe::core_crypto::entities::Cleartext;
-use tfhe::shortint::wopbs::{ShortintWopbsLUT, WopbsLUTBase};
+use tfhe::shortint::wopbs::WopbsLUTBase;
 
 impl ByteT for Byte<BitCt> {
     fn bootstrap_assign(&mut self) {
         let context = &self.bits().find_first(|_| true).unwrap().context.clone();
 
         static IDENTITY_LUT: OnceLock<WopbsLUTBase> = OnceLock::new();
-        let lut = IDENTITY_LUT.get_or_init(|| {
-            context.generate_lookup_table(1, 1, |bit| bit)
-        });
+        let lut = IDENTITY_LUT.get_or_init(|| context.generate_lookup_table(1, 1, |bit| bit));
 
         self.bits_mut().for_each(|bit| {
-            let new_bit = context.circuit_bootstrap(&[bit], lut).into_iter().next().expect("one bit");
-            *bit = context.extract_bit_from_dual_bit(&new_bit);
+            let new_bit = context
+                .circuit_bootstrap(&[bit], lut)
+                .into_iter()
+                .next()
+                .expect("one bit");
+            *bit = context.extract_bit_from_dual_ciphertext(&new_bit);
         });
     }
 
@@ -31,15 +31,14 @@ impl ByteT for Byte<BitCt> {
         let context = &self.bits().find_first(|_| true).unwrap().context;
 
         static SBOX_LUT: OnceLock<WopbsLUTBase> = OnceLock::new();
-        let lut = SBOX_LUT.get_or_init(|| {
-            context.generate_lookup_table(8, 8, |byte| SBOX[byte as usize])
-        });
+        let lut = SBOX_LUT
+            .get_or_init(|| context.generate_lookup_table(8, 8, |byte| SBOX[byte as usize]));
 
         let new_dual_bits = context.circuit_bootstrap(&self.0.each_ref(), &lut);
         let new_bits: [BitCt; 8] = util::par_collect_array(
             new_dual_bits
                 .into_par_iter()
-                .map(|dual_bit| context.extract_bit_from_dual_bit(&dual_bit)),
+                .map(|dual_bit| context.extract_bit_from_dual_ciphertext(&dual_bit)),
         );
 
         Self(new_bits)

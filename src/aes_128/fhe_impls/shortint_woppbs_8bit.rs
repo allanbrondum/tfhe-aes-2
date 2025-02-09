@@ -1,6 +1,6 @@
 //! Implementation of AES-128 using 8 bit `shortint` WoP-PBS
 
-use crate::aes_128::fhe::data_model::{Byte, ByteT};
+use crate::aes_128::fhe_sub_pbs::data_model::{Byte, ByteT};
 use crate::aes_128::SBOX;
 use crate::tfhe::shortint_woppbs_8bit::*;
 

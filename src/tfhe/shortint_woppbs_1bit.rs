@@ -1,4 +1,7 @@
-//! Model with each ciphertext representing 1 bit. Build on `tfhe-rs` `shortint` module with WoP-PBS
+//! Model with each ciphertext representing 1 bit. Build on `tfhe-rs` `shortint` module with WoP-PBS.
+//!
+//! Leveled calculations are intended to be performed on the ciphertext [`BitCt`]. In comparison to
+//! how it is
 
 use crate::tfhe::{ClientKeyT, ContextT};
 
@@ -12,7 +15,7 @@ use tfhe::shortint::ciphertext::{Degree, NoiseLevel};
 
 use crate::tfhe::engine::ShortintEngine;
 use crate::util;
-use tfhe::shortint::wopbs::{ShortintWopbsLUT, WopbsKey, WopbsLUTBase};
+use tfhe::shortint::wopbs::{ WopbsKey, WopbsLUTBase};
 use tfhe::shortint::{
     CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus, ShortintParameterSet,
     WopbsParameters,
@@ -33,7 +36,7 @@ use tracing::debug;
 /// - 7 :   4,  9,  661,    3, 12,     6,  2,     2,  9,     2, 16,    353, 5.3e-20
 /// ...
 /// ```
-fn params() -> ShortintParameterSet {
+fn params_() -> ShortintParameterSet { // todo
     let wopbs_params = WopbsParameters {
         lwe_dimension: LweDimension(661),
         glwe_dimension: GlweDimension(4),
@@ -52,6 +55,55 @@ fn params() -> ShortintParameterSet {
         cbs_base_log: DecompositionBaseLog(9),
         pfks_level: DecompositionLevelCount(2),
         pfks_base_log: DecompositionBaseLog(16),
+        pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            2.845267479601915e-15,
+        )),
+        message_modulus: MessageModulus(2),
+        carry_modulus: CarryModulus(1),
+        ciphertext_modulus: CiphertextModulus::new_native(),
+        encryption_key_choice: EncryptionKeyChoice::Big,
+    };
+
+    let pbs_params = ClassicPBSParameters {
+        lwe_dimension: wopbs_params.lwe_dimension,
+        glwe_dimension: wopbs_params.glwe_dimension,
+        polynomial_size: wopbs_params.polynomial_size,
+        lwe_noise_distribution: wopbs_params.lwe_noise_distribution,
+        glwe_noise_distribution: wopbs_params.glwe_noise_distribution,
+        pbs_base_log: wopbs_params.pbs_base_log,
+        pbs_level: wopbs_params.pbs_level,
+        ks_base_log: wopbs_params.ks_base_log,
+        ks_level: wopbs_params.ks_level,
+        message_modulus: wopbs_params.message_modulus,
+        carry_modulus: wopbs_params.carry_modulus,
+        max_noise_level: MaxNoiseLevel::new(11),
+        log2_p_fail: -64.074,
+        ciphertext_modulus: wopbs_params.ciphertext_modulus,
+        encryption_key_choice: wopbs_params.encryption_key_choice,
+    };
+
+    ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
+}
+
+fn params() -> ShortintParameterSet {
+    let wopbs_params = WopbsParameters {
+        lwe_dimension: LweDimension(665),
+        glwe_dimension: GlweDimension(2),
+        polynomial_size: PolynomialSize(1024),
+        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            6.676348397087967e-05,
+        )),
+        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            2.845267479601915e-15,
+        )),
+        pbs_level: DecompositionLevelCount(4),
+        pbs_base_log: DecompositionBaseLog(9),
+        ks_level: DecompositionLevelCount(6),
+        ks_base_log: DecompositionBaseLog(2),
+        cbs_level: DecompositionLevelCount(1),
+        cbs_base_log: DecompositionBaseLog(14),
+        pfks_level: DecompositionLevelCount(3),
+        pfks_base_log: DecompositionBaseLog(12),
         pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
             2.845267479601915e-15,
         )),
@@ -255,7 +307,12 @@ impl FheContext {
         (client_key, context)
     }
 
-    /// Generate lookup table for the given function considering the given number of bits
+    /// Generate lookup table for the given function considering the given number of bits of input and
+    /// output (the least significant bits) in the given function. When the returned LUT is used with [`Self::circuit_bootstrap`], the same number of input
+    /// bits should be given, and the number of "dual" ciphertexts returned is the same as the number of output bits
+    /// specified in the LUT.
+    ///
+    /// Current implementation supports up to 8 bits, but the implementation can be changed to support more bits if needed.
     pub fn generate_lookup_table(
         &self,
         input_bits: usize,
@@ -273,7 +330,8 @@ impl FheContext {
         )
     }
 
-    /// Circuit bootstrap of multiple bits with multiple input bits
+    /// Circuit bootstrap using the given bits as input. Returns "dual" ciphertexts should be
+    /// extracted to ciphertexts that can be calculated on via [`Self::extract_bit_from_dual_ciphertext`]
     pub fn circuit_bootstrap(&self, bits: &[&BitCt], lut: &WopbsLUTBase) -> Vec<DualCiphertext> {
         let start = Instant::now();
 
@@ -306,7 +364,7 @@ impl FheContext {
     }
 
     /// Extract the single bit from the "dual" ciphertext. This is effectively just a keyswitch
-    pub fn extract_bit_from_dual_bit(&self, ct: &DualCiphertext) -> BitCt {
+    pub fn extract_bit_from_dual_ciphertext(&self, ct: &DualCiphertext) -> BitCt {
         let start = Instant::now();
 
         let shortint_ct = shortint::Ciphertext::new(
@@ -354,6 +412,9 @@ fn generate_multivariate_luts(
         CiphertextCount(output_bits),
     );
 
+    // The LUT for circuit bootstrap contains one polynomial per output "sub-function". And each
+    // polynomial is a vertical packing of the function evaluations, one input value per monomial.
+    // See lwe_wopbs::circuit_bootstrap_boolean_vertical_packing_lwe_ciphertext_list_mem_optimized
     for output_bit in 0..output_bits {
         for (val, value) in lut
             .get_small_lut_mut(output_bit)
@@ -375,7 +436,7 @@ fn generate_multivariate_luts(
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use std::{array, iter};
+    use std::{array,};
 
     use crate::{logger, util};
     use std::sync::{Arc, LazyLock};
@@ -469,7 +530,7 @@ pub mod test {
 
         let tv = context.generate_lookup_table(bits, 1, parity_fn);
         let d = context.circuit_bootstrap(&bit_cts.each_ref()[8 - bits..], &tv).into_iter().next().expect("one bit");
-        let d = context.extract_bit_from_dual_bit(&d);
+        let d = context.extract_bit_from_dual_ciphertext(&d);
 
         assert_eq!(client_key.decrypt(&d).0 as u8, parity_fn(byte));
     }
@@ -511,7 +572,7 @@ pub mod test {
 
         let out_clear: Vec<_> = out
             .into_iter()
-            .map(|d| client_key.decrypt(&context.extract_bit_from_dual_bit(&d)))
+            .map(|d| client_key.decrypt(&context.extract_bit_from_dual_ciphertext(&d)))
             .collect();
         let out_bits: [u8; 8] = array::from_fn(|i| {
             out_clear
@@ -522,5 +583,12 @@ pub mod test {
         let out_byte = util::bits_to_byte(out_bits);
 
         assert_eq!(out_byte, square_fn(byte));
+    }
+
+    #[test]
+    fn test_multivariate_multivalues_perf_8() {
+        logger::test_init(LevelFilter::DEBUG);
+
+        test_multivariate_multivalued_square_fn_impl(8, 0b11001001);
     }
 }

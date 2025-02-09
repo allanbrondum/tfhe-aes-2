@@ -1,4 +1,4 @@
-use crate::aes_128::fhe::data_model::{Block, Byte, Word};
+use crate::aes_128::fhe_sub_pbs::data_model::{Block, Byte, Word};
 use crate::aes_128::plain;
 use crate::tfhe::ClientKeyT;
 use crate::{aes_128, util};

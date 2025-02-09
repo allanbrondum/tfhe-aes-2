@@ -1,9 +1,9 @@
 //! Generic implementation based on one ciphertext representing one bit. This means that "xor" can be
-//! evaluated and a simple addition of ciphertext. Byte substitution is calculated via bootstrapping.
+//! evaluated and a simple addition of ciphertext. XBOX byte substitution is calculated via programmable bootstrapping.
 
 pub mod data_model;
 
-use crate::aes_128::fhe::data_model::{BitT, Block, Byte, ByteT, State, Word};
+use crate::aes_128::fhe_sub_pbs::data_model::{BitT, Block, Byte, ByteT, State, Word};
 use crate::aes_128::{RC, ROUNDS};
 use crate::util;
 use rayon::iter::IndexedParallelIterator;
@@ -12,7 +12,7 @@ use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use std::array;
 
 use crate::tfhe::ContextT;
-use tracing::{debug, info};
+use tracing::{debug};
 
 fn substitute<Bit>(byte: &Byte<Bit>) -> Byte<Bit>
 where

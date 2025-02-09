@@ -1,8 +1,8 @@
 use std::time::Instant;
 
 use crate::aes_128;
-use crate::aes_128::fhe::data_model::{BitT, Block, Byte, ByteT, Word};
-use crate::aes_128::{aes_lib, fhe, fhe_encryption, plain, ROUNDS};
+use crate::aes_128::fhe_sub_pbs::data_model::{BitT, Block, Byte, ByteT, Word};
+use crate::aes_128::{aes_lib, fhe_sub_pbs, fhe_encryption, plain, ROUNDS};
 use crate::tfhe::{ClientKeyT, ContextT};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -59,11 +59,11 @@ where
     CK: ClientKeyT,
     Ctx: ContextT<Bit = CK::Bit>,
 {
-    let mut key_clear: aes_128::Key = hex::decode("000102030405060708090a0b0c0d0e0f")
+    let key_clear: aes_128::Key = hex::decode("000102030405060708090a0b0c0d0e0f")
         .unwrap()
         .try_into()
         .unwrap();
-    let mut block1_clear: aes_128::Block = hex::decode("00112233445566778899aabbccddeeff")
+    let block1_clear: aes_128::Block = hex::decode("00112233445566778899aabbccddeeff")
         .unwrap()
         .try_into()
         .unwrap();
@@ -130,7 +130,7 @@ where
 {
     // Server side (optional): AES encrypt blocks
     let start = Instant::now();
-    let key_schedule = fhe::key_schedule(ctx, &key);
+    let key_schedule = fhe_sub_pbs::key_schedule(ctx, &key);
     println!("AES key expansion took: {:?}", start.elapsed());
 
     key_schedule
@@ -150,7 +150,7 @@ where
     let start = Instant::now();
     let encrypted_blocks: Vec<_> = blocks
         .into_par_iter()
-        .map(|block| fhe::encrypt_block_for_rounds(ctx, &key_schedule, block, rounds))
+        .map(|block| fhe_sub_pbs::encrypt_block_for_rounds(ctx, &key_schedule, block, rounds))
         .collect();
     println!(
         "AES ({} rounds) of #{} outputs computed in: {:?}",

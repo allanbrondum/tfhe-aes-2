@@ -1,3 +1,6 @@
+//! Implementation of different TFHE models (defines keys, encodings, operations and parameters).
+//! All build on `tfhe-rs`. Implements no AES specific logic
+
 use tfhe::core_crypto::entities::Cleartext;
 
 mod engine;

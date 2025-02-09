@@ -1,13 +1,17 @@
-/// Call `aes` crate
+//! EAS encryption implementations
+
+/// Wrapper around `aes` crate used for reference
 pub mod aes_lib;
-/// Data model and logic for AES-128 encryption executed in an FHE context
-pub mod fhe;
-/// Utilities to encrypt clear data (e.g. keys and blocks) into FHE
+/// Data model and logic for AES-128 encryption executed in an FHE context. Based on XOR's of individual bits
+/// and using programmable bootstrap for SubBytes. Generic over the TFHE model used.
+pub mod fhe_sub_pbs;
+/// Utilities to encrypt clear data (e.g. keys and blocks) into FHE data model
 pub mod fhe_encryption;
-/// FHE AES-128 implementations
+/// FHE AES-128 implementations using different TFHE models
 pub mod fhe_impls;
 /// Plain AES-128 implementation used for testing reference (e.g. running less than 10 rounds)
 pub mod plain;
+/// Utilities for implementing tests of AES-128
 #[cfg(test)]
 mod test_helper;
 
