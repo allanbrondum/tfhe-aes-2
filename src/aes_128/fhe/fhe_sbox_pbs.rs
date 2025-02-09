@@ -1,6 +1,7 @@
 //! Generic implementation based on one ciphertext representing one bit. This means that "xor" can be
 //! evaluated and a simple addition of ciphertext. SBOX byte substitution is calculated via programmable bootstrapping.
 
+use crate::aes_128::fhe::data_model;
 use crate::aes_128::fhe::data_model::{BitT, Block};
 use crate::aes_128::fhe::data_model::{Byte, State, Word};
 use crate::aes_128::{RC, ROUNDS};
@@ -22,32 +23,14 @@ pub trait ByteT: Sized {
     fn sbox_substitute(&self) -> Self;
 }
 
-fn substitute<Bit>(byte: &Byte<Bit>) -> Byte<Bit>
-where
-    Byte<Bit>: ByteT,
-{
-    byte.sbox_substitute()
-}
-
-fn xor_state<Bit: BitT>(state: &mut State<Bit>, key: &[Word<Bit>; 4]) {
-    for (j, word) in key.iter().enumerate() {
-        state.column_mut(j).bitxor_assign(word);
-    }
-}
-
+/// SubBytes step in AES
 fn sub_bytes<Bit: BitT>(state: &mut State<Bit>)
 where
     Byte<Bit>: ByteT,
 {
     state.bytes_mut().for_each(|byte| {
-        *byte = substitute(byte);
+        *byte = byte.sbox_substitute();
     })
-}
-
-fn shift_rows<Bit: BitT>(state: &mut State<Bit>) {
-    state.rows_mut().enumerate().for_each(|(i, row)| {
-        row.rotate_left_assign(i);
-    });
 }
 
 /// Multiplication in F_2[X]/(X^8 + X^4 + X^3 + X + 1)
@@ -74,6 +57,7 @@ where
     res
 }
 
+/// MixColumns step in AES
 fn mix_columns<Ctx: ContextT>(ctx: &Ctx, state: &mut State<Ctx::Bit>)
 where
     Ctx::Bit: BitT,
@@ -92,18 +76,6 @@ where
     }
 }
 
-pub fn encrypt_block<Ctx: ContextT>(
-    ctx: &Ctx,
-    expanded_key: &[Word<Ctx::Bit>; 44],
-    block: Block<Ctx::Bit>,
-) -> Block<Ctx::Bit>
-where
-    Ctx::Bit: BitT,
-    Byte<Ctx::Bit>: ByteT,
-{
-    encrypt_block_for_rounds(ctx, expanded_key, block, ROUNDS)
-}
-
 pub fn encrypt_block_for_rounds<Ctx: ContextT>(
     ctx: &Ctx,
     expanded_key: &[Word<Ctx::Bit>; 44],
@@ -116,7 +88,7 @@ where
 {
     let mut state_fhe = State::from_array(block);
 
-    xor_state(
+    data_model::xor_state(
         &mut state_fhe,
         expanded_key[0..4].try_into().expect("array length 4"),
     );
@@ -126,11 +98,11 @@ where
         debug!("sub_bytes");
         sub_bytes(&mut state_fhe);
         debug!("shift_rows");
-        shift_rows(&mut state_fhe);
+        data_model::shift_rows(&mut state_fhe);
         debug!("mix_columns");
         mix_columns(ctx, &mut state_fhe);
         debug!("xor_state");
-        xor_state(
+        data_model::xor_state(
             &mut state_fhe,
             expanded_key[i * 4..(i + 1) * 4]
                 .try_into()
@@ -142,9 +114,9 @@ where
     debug!("sub_bytes");
     sub_bytes(&mut state_fhe);
     debug!("shift_rows");
-    shift_rows(&mut state_fhe);
+    data_model::shift_rows(&mut state_fhe);
     debug!("xor_state");
-    xor_state(
+    data_model::xor_state(
         &mut state_fhe,
         expanded_key[40..44].try_into().expect("array length 4"),
     );
@@ -210,7 +182,7 @@ where
     Byte<Bit>: ByteT,
 {
     word.bytes_mut().for_each(|byte| {
-        *byte = substitute(byte);
+        *byte = byte.sbox_substitute();
     });
 
     word

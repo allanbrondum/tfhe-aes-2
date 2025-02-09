@@ -8,8 +8,12 @@ use tfhe_aes::aes_128::fhe::data_model::{BitT, Block, Byte, Word};
 use tfhe_aes::aes_128::{aes_lib, fhe::fhe_encryption, fhe::fhe_sbox_gal_mul_pbs};
 use tfhe_aes::{aes_128, logger};
 
-use tfhe_aes::aes_128::fhe::fhe_sbox_pbs;
+use tfhe_aes::aes_128::fhe::fhe_sbox_gal_mul_pbs_impls::shortint_woppbs_1bit::ShortintWoppbs1BitSboxGalMulPbsAesEncrypt;
 use tfhe_aes::aes_128::fhe::fhe_sbox_pbs::ByteT;
+use tfhe_aes::aes_128::fhe::fhe_sbox_pbs_impls::shortint_1bit::Shortint1BitSboxPbsAesEncrypt;
+use tfhe_aes::aes_128::fhe::fhe_sbox_pbs_impls::shortint_woppbs_1bit::ShortintWoppbs1BitSboxPbsAesEncrypt;
+use tfhe_aes::aes_128::fhe::fhe_sbox_pbs_impls::shortint_woppbs_8bit::ShortintWoppbs8BitSboxPbsAesEncrypt;
+use tfhe_aes::aes_128::fhe::{fhe_sbox_pbs, Aes128Encrypt};
 use tfhe_aes::tfhe::{
     shortint_1bit, shortint_woppbs_1bit, shortint_woppbs_8bit, ClientKeyT, ContextT,
 };
@@ -58,32 +62,47 @@ fn main() -> anyhow::Result<()> {
     match args.implementation {
         Implementation::Shortint1bit => {
             let (client_key, context) = shortint_1bit::FheContext::generate_keys();
-            run_client_server_aes_scenario(&client_key, &context, key, iv, args.number_of_outputs);
+            run_client_server_aes_scenario::<Shortint1BitSboxPbsAesEncrypt, _>(
+                &client_key,
+                &context,
+                key,
+                iv,
+                args.number_of_outputs,
+            );
         }
         Implementation::ShortintWoppbs8bit => {
             let (client_key, context) = shortint_woppbs_8bit::FheContext::generate_keys();
-            run_client_server_aes_scenario(&client_key, &context, key, iv, args.number_of_outputs);
+            run_client_server_aes_scenario::<ShortintWoppbs8BitSboxPbsAesEncrypt, _>(
+                &client_key,
+                &context,
+                key,
+                iv,
+                args.number_of_outputs,
+            );
         }
         Implementation::ShortintWoppbs1bit => {
             let (client_key, context) = shortint_woppbs_1bit::FheContext::generate_keys();
-            run_client_server_aes_scenario(&client_key, &context, key, iv, args.number_of_outputs);
+            run_client_server_aes_scenario::<ShortintWoppbs1BitSboxPbsAesEncrypt, _>(
+                &client_key,
+                &context,
+                key,
+                iv,
+                args.number_of_outputs,
+            );
         }
     }
 
     Ok(())
 }
 
-fn run_client_server_aes_scenario<CK, Ctx>(
+fn run_client_server_aes_scenario<Enc: Aes128Encrypt, CK>(
     client_key: &CK,
-    ctx: &Ctx,
+    ctx: &Enc::Ctx,
     key_clear: aes_128::Key,
     iv: [u8; 8],
     block_count: usize,
 ) where
-    CK::Bit: BitT,
-    Byte<CK::Bit>: ByteT,
-    CK: ClientKeyT,
-    Ctx: ContextT<Bit = CK::Bit>,
+    CK: ClientKeyT<Bit = <Enc::Ctx as ContextT>::Bit>,
 {
     // Client side: FHE encrypt AES key and block
     let key = fhe_encryption::encrypt_byte_array(client_key, &key_clear);
@@ -98,8 +117,8 @@ fn run_client_server_aes_scenario<CK, Ctx>(
     let blocks = fhe_encryption::encrypt_blocks(client_key, &blocks_clear);
     debug!("aes key and block fhe encrypted");
 
-    let key_schedule = expand_key(ctx, key);
-    let encrypted_blocks = encrypt_blocks(ctx, key_schedule, blocks);
+    let key_schedule = expand_key::<Enc>(ctx, key);
+    let encrypted_blocks = encrypt_blocks::<Enc>(ctx, key_schedule, blocks);
 
     // Client side (optional): FHE decrypt AES encrypted blocks
     let encrypted_blocks_clear = fhe_encryption::decrypt_blocks(client_key, &encrypted_blocks);
@@ -109,36 +128,28 @@ fn run_client_server_aes_scenario<CK, Ctx>(
     assert_eq!(encrypted_blocks_clear, aes_lib_encrypted_blocks);
 }
 
-fn expand_key<Ctx: ContextT>(
-    ctx: &Ctx,
-    key: [Byte<Ctx::Bit>; 16],
-) -> [Word<<Ctx as ContextT>::Bit>; 44]
-where
-    Ctx::Bit: BitT,
-    Byte<Ctx::Bit>: ByteT,
-{
+fn expand_key<Enc: Aes128Encrypt>(
+    ctx: &Enc::Ctx,
+    key: [Byte<<Enc::Ctx as ContextT>::Bit>; 16],
+) -> [Word<<Enc::Ctx as ContextT>::Bit>; 44] {
     // Server side (optional): AES encrypt blocks
     let start = Instant::now();
-    let key_schedule = fhe_sbox_pbs::key_schedule(ctx, &key);
+    let key_schedule = Enc::key_schedule(ctx, &key);
     println!("AES key expansion took: {:?}", start.elapsed());
     key_schedule
 }
 
-fn encrypt_blocks<Ctx: ContextT>(
-    ctx: &Ctx,
-    key_schedule: [Word<<Ctx as ContextT>::Bit>; 44],
-    blocks: Vec<Block<Ctx::Bit>>,
-) -> Vec<Block<Ctx::Bit>>
-where
-    Ctx::Bit: BitT,
-    Byte<Ctx::Bit>: ByteT,
-{
+fn encrypt_blocks<Enc: Aes128Encrypt>(
+    ctx: &Enc::Ctx,
+    key_schedule: [Word<<Enc::Ctx as ContextT>::Bit>; 44],
+    blocks: Vec<Block<<Enc::Ctx as ContextT>::Bit>>,
+) -> Vec<Block<<Enc::Ctx as ContextT>::Bit>> {
     // Server side: AES encrypt blocks
     let start = Instant::now();
     let encrypted_blocks: Vec<_> = blocks
         .into_par_iter()
         // todo limit parallelization of blocks?
-        .map(|block| fhe_sbox_pbs::encrypt_block(ctx, &key_schedule, block))
+        .map(|block| Enc::encrypt_block(ctx, &key_schedule, block))
         .collect();
     println!(
         "AES of #{} outputs computed in: {:?}",

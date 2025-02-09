@@ -4,7 +4,7 @@ use crate::aes_128;
 use crate::aes_128::fhe::data_model::BitT;
 use crate::aes_128::fhe::data_model::{Block, Byte, Word};
 use crate::aes_128::fhe::fhe_sbox_pbs::ByteT;
-use crate::aes_128::fhe::{fhe_encryption, fhe_sbox_pbs};
+use crate::aes_128::fhe::{fhe_encryption, fhe_sbox_pbs, Aes128Encrypt};
 use crate::aes_128::{aes_lib, plain, ROUNDS};
 use crate::tfhe::{ClientKeyT, ContextT};
 use rand::{Rng, SeedableRng};
@@ -12,24 +12,20 @@ use rand_chacha::ChaCha20Rng;
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
 
-pub fn test_full<CK, Ctx>(client_key: &CK, ctx: &Ctx)
+pub fn test_full<Enc: Aes128Encrypt, CK>(client_key: &CK, ctx: &Enc::Ctx)
 where
-    CK::Bit: BitT,
-    Byte<CK::Bit>: ByteT,
-    CK: ClientKeyT,
-    Ctx: ContextT<Bit = CK::Bit>,
+    CK: ClientKeyT<Bit = <Enc::Ctx as ContextT>::Bit>,
 {
-    test_key_expansion_and_block_encryption_vs_aes(client_key, ctx);
-    test_key_expansion_and_block_encryption_fips_197(client_key, ctx);
+    test_key_expansion_and_block_encryption_vs_aes::<Enc, _>(client_key, ctx);
+    test_key_expansion_and_block_encryption_fips_197::<Enc, _>(client_key, ctx);
 }
 
 /// Full test against `aes` Rust library
-pub fn test_key_expansion_and_block_encryption_vs_aes<CK, Ctx>(client_key: &CK, ctx: &Ctx)
-where
-    CK::Bit: BitT,
-    Byte<CK::Bit>: ByteT,
-    CK: ClientKeyT,
-    Ctx: ContextT<Bit = CK::Bit>,
+pub fn test_key_expansion_and_block_encryption_vs_aes<Enc: Aes128Encrypt, CK>(
+    client_key: &CK,
+    ctx: &Enc::Ctx,
+) where
+    CK: ClientKeyT<Bit = <Enc::Ctx as ContextT>::Bit>,
 {
     let seed: [u8; 32] = Default::default();
     let mut rng = ChaCha20Rng::from_seed(seed);
@@ -44,8 +40,8 @@ where
     let key = fhe_encryption::encrypt_byte_array(client_key, &key_clear);
     let blocks = fhe_encryption::encrypt_blocks(client_key, blocks_clear);
 
-    let key_schedule = expand_key(ctx, key);
-    let encrypted = encrypt_blocks(ctx, key_schedule, blocks, ROUNDS);
+    let key_schedule = expand_key::<Enc>(ctx, key);
+    let encrypted = encrypt_blocks::<Enc>(ctx, key_schedule, blocks, ROUNDS);
     let encrypted_clear = fhe_encryption::decrypt_blocks(client_key, &encrypted);
 
     assert_eq!(
@@ -55,12 +51,11 @@ where
 }
 
 /// Full test against test vector in FIPS 197 appendix C.1
-pub fn test_key_expansion_and_block_encryption_fips_197<CK, Ctx>(client_key: &CK, ctx: &Ctx)
-where
-    CK::Bit: BitT,
-    Byte<CK::Bit>: ByteT,
-    CK: ClientKeyT,
-    Ctx: ContextT<Bit = CK::Bit>,
+pub fn test_key_expansion_and_block_encryption_fips_197<Enc: Aes128Encrypt, CK>(
+    client_key: &CK,
+    ctx: &Enc::Ctx,
+) where
+    CK: ClientKeyT<Bit = <Enc::Ctx as ContextT>::Bit>,
 {
     let key_clear: aes_128::Key = hex::decode("000102030405060708090a0b0c0d0e0f")
         .unwrap()
@@ -75,8 +70,8 @@ where
     let key = fhe_encryption::encrypt_byte_array(client_key, &key_clear);
     let blocks = fhe_encryption::encrypt_blocks(client_key, blocks_clear);
 
-    let key_schedule = expand_key(ctx, key);
-    let encrypted = encrypt_blocks(ctx, key_schedule, blocks, ROUNDS);
+    let key_schedule = expand_key::<Enc>(ctx, key);
+    let encrypted = encrypt_blocks::<Enc>(ctx, key_schedule, blocks, ROUNDS);
     let encrypted_clear = fhe_encryption::decrypt_blocks(client_key, &encrypted);
 
     let expected_encrypted_clear: aes_128::Block = hex::decode("69c4e0d86a7b0430d8cdb78070b4c55a")
@@ -87,23 +82,20 @@ where
     assert_eq!(encrypted_clear, vec![expected_encrypted_clear],);
 }
 
-pub fn test_light<CK, Ctx>(client_key: &CK, ctx: &Ctx)
+pub fn test_light<Enc: Aes128Encrypt, CK>(client_key: &CK, ctx: &Enc::Ctx)
 where
-    CK::Bit: BitT,
-    Byte<CK::Bit>: ByteT,
-    CK: ClientKeyT,
-    Ctx: ContextT<Bit = CK::Bit>,
+    CK: ClientKeyT<Bit = <Enc::Ctx as ContextT>::Bit>,
 {
-    test_block_encryption_vs_plain(client_key, ctx, 2);
+    test_block_encryption_vs_plain::<Enc, _>(client_key, ctx, 2);
 }
 
 /// Short(er) running test that only tests a limited number of AES rounds and does not test key expansion
-pub fn test_block_encryption_vs_plain<CK, Ctx>(client_key: &CK, ctx: &Ctx, rounds: usize)
-where
-    CK::Bit: BitT,
-    Byte<CK::Bit>: ByteT,
-    CK: ClientKeyT,
-    Ctx: ContextT<Bit = CK::Bit>,
+pub fn test_block_encryption_vs_plain<Enc: Aes128Encrypt, CK>(
+    client_key: &CK,
+    ctx: &Enc::Ctx,
+    rounds: usize,
+) where
+    CK: ClientKeyT<Bit = <Enc::Ctx as ContextT>::Bit>,
 {
     let seed: [u8; 32] = Default::default();
     let mut rng = ChaCha20Rng::from_seed(seed);
@@ -117,7 +109,7 @@ where
     let key_schedule = fhe_encryption::encrypt_word_array(client_key, &key_schedule_clear);
     let blocks = fhe_encryption::encrypt_blocks(client_key, blocks_clear);
 
-    let encrypted = encrypt_blocks(ctx, key_schedule, blocks, rounds);
+    let encrypted = encrypt_blocks::<Enc>(ctx, key_schedule, blocks, rounds);
     let encrypted_clear = fhe_encryption::decrypt_blocks(client_key, &encrypted);
 
     assert_eq!(
@@ -126,34 +118,29 @@ where
     );
 }
 
-fn expand_key<Ctx: ContextT>(ctx: &Ctx, key: [Byte<Ctx::Bit>; 16]) -> [Word<Ctx::Bit>; 44]
-where
-    Ctx::Bit: BitT,
-    Byte<Ctx::Bit>: ByteT,
-{
+fn expand_key<Enc: Aes128Encrypt>(
+    ctx: &Enc::Ctx,
+    key: [Byte<<Enc::Ctx as ContextT>::Bit>; 16],
+) -> [Word<<Enc::Ctx as ContextT>::Bit>; 44] {
     // Server side (optional): AES encrypt blocks
     let start = Instant::now();
-    let key_schedule = fhe_sbox_pbs::key_schedule(ctx, &key);
+    let key_schedule = Enc::key_schedule(ctx, &key);
     println!("AES key expansion took: {:?}", start.elapsed());
 
     key_schedule
 }
 
-fn encrypt_blocks<Ctx: ContextT>(
-    ctx: &Ctx,
-    key_schedule: [Word<Ctx::Bit>; 44],
-    blocks: Vec<Block<Ctx::Bit>>,
+fn encrypt_blocks<Enc: Aes128Encrypt>(
+    ctx: &Enc::Ctx,
+    key_schedule: [Word<<Enc::Ctx as ContextT>::Bit>; 44],
+    blocks: Vec<Block<<Enc::Ctx as ContextT>::Bit>>,
     rounds: usize,
-) -> Vec<Block<Ctx::Bit>>
-where
-    Ctx::Bit: BitT,
-    Byte<Ctx::Bit>: ByteT,
-{
+) -> Vec<Block<<Enc::Ctx as ContextT>::Bit>> {
     // Server side: AES encrypt blocks
     let start = Instant::now();
     let encrypted_blocks: Vec<_> = blocks
         .into_par_iter()
-        .map(|block| fhe_sbox_pbs::encrypt_block_for_rounds(ctx, &key_schedule, block, rounds))
+        .map(|block| Enc::encrypt_block_for_rounds(ctx, &key_schedule, block, rounds))
         .collect();
     println!(
         "AES ({} rounds) of #{} outputs computed in: {:?}",

@@ -1,12 +1,14 @@
 //! Implementation of AES-128 using 1 bit `shortint` WoP-PBS
 
-use crate::aes_128::fhe::data_model::{BitT, Byte};
+use crate::aes_128::fhe::data_model::{BitT, Block, Byte, Word};
 use crate::aes_128::SBOX;
 use crate::tfhe::shortint_woppbs_1bit::*;
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use crate::aes_128::fhe::fhe_sbox_gal_mul_pbs::ByteT;
+use crate::aes_128::fhe::{fhe_sbox_gal_mul_pbs, Aes128Encrypt};
+use crate::tfhe::ContextT;
 use crate::util;
 use std::sync::OnceLock;
 use tfhe::shortint::wopbs::WopbsLUTBase;
@@ -64,8 +66,31 @@ impl ByteT for Byte<BitCt> {
     }
 }
 
+pub struct ShortintWoppbs1BitSboxGalMulPbsAesEncrypt;
+
+impl Aes128Encrypt for ShortintWoppbs1BitSboxGalMulPbsAesEncrypt {
+    type Ctx = FheContext;
+
+    fn encrypt_block_for_rounds(
+        ctx: &Self::Ctx,
+        expanded_key: &[Word<<Self::Ctx as ContextT>::Bit>; 44],
+        block: Block<<Self::Ctx as ContextT>::Bit>,
+        rounds: usize,
+    ) -> Block<<Self::Ctx as ContextT>::Bit> {
+        fhe_sbox_gal_mul_pbs::encrypt_block_for_rounds(ctx, expanded_key, block, rounds)
+    }
+
+    fn key_schedule(
+        ctx: &Self::Ctx,
+        key_slice: &[Byte<<Self::Ctx as ContextT>::Bit>; 16],
+    ) -> [Word<<Self::Ctx as ContextT>::Bit>; 44] {
+        fhe_sbox_gal_mul_pbs::key_schedule(ctx, key_slice)
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use crate::aes_128::fhe::fhe_sbox_gal_mul_pbs_impls::shortint_woppbs_1bit::ShortintWoppbs1BitSboxGalMulPbsAesEncrypt;
     use crate::aes_128::test_helper;
     use crate::logger;
     use tracing::metadata::LevelFilter;
@@ -76,7 +101,10 @@ mod test {
 
         let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS.clone();
 
-        test_helper::test_light(client_key.as_ref(), &ctx);
+        test_helper::test_light::<ShortintWoppbs1BitSboxGalMulPbsAesEncrypt, _>(
+            client_key.as_ref(),
+            &ctx,
+        );
     }
 
     #[test]
@@ -86,6 +114,9 @@ mod test {
 
         let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS.clone();
 
-        test_helper::test_full(client_key.as_ref(), &ctx);
+        test_helper::test_full::<ShortintWoppbs1BitSboxGalMulPbsAesEncrypt, _>(
+            client_key.as_ref(),
+            &ctx,
+        );
     }
 }

@@ -265,3 +265,17 @@ impl<Bit: BitT> ColumnViewMutFhe<'_, Bit> {
         });
     }
 }
+
+/// AddRoundKey step in AES
+pub fn xor_state<Bit: BitT>(state: &mut State<Bit>, key: &[Word<Bit>; 4]) {
+    for (j, word) in key.iter().enumerate() {
+        state.column_mut(j).bitxor_assign(word);
+    }
+}
+
+/// ShiftRows step in AES
+pub fn shift_rows<Bit: BitT>(state: &mut State<Bit>) {
+    state.rows_mut().enumerate().for_each(|(i, row)| {
+        row.rotate_left_assign(i);
+    });
+}

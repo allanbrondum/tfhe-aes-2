@@ -14,6 +14,7 @@ pub trait ByteT: Sized {
     fn sbox_substitute_and_gal_mul(&self) -> [Self; 3];
 }
 
+use crate::aes_128::fhe::data_model;
 use crate::aes_128::fhe::data_model::{BitT, Block, Byte, State, Word};
 use crate::aes_128::{RC, ROUNDS};
 use crate::tfhe::ContextT;
@@ -27,12 +28,7 @@ use std::fmt::Debug;
 use std::ops::BitXorAssign;
 use tracing::debug;
 
-fn xor_state<Bit: BitT>(state: &mut State<Bit>, key: &[Word<Bit>; 4]) {
-    for (j, word) in key.iter().enumerate() {
-        state.column_mut(j).bitxor_assign(word);
-    }
-}
-
+/// SubBytes step in AES composed with Galois multiplication for MixColumns
 fn sub_bytes_with_gal_mul<Bit: BitT>(state: State<Bit>) -> [State<Bit>; 3]
 where
     Byte<Bit>: ByteT,
@@ -56,6 +52,7 @@ where
     ]
 }
 
+/// SubBytes step in AES
 fn sub_bytes<Bit: BitT>(state: &mut State<Bit>)
 where
     Byte<Bit>: ByteT,
@@ -65,12 +62,7 @@ where
     })
 }
 
-fn shift_rows<Bit: BitT>(state: &mut State<Bit>) {
-    state.rows_mut().enumerate().for_each(|(i, row)| {
-        row.rotate_left_assign(i);
-    });
-}
-
+/// MixColumns step in AES
 fn mix_columns<Ctx: ContextT>(ctx: &Ctx, state_muls: [State<Ctx::Bit>; 3]) -> State<Ctx::Bit>
 where
     Ctx::Bit: BitT,
@@ -97,18 +89,6 @@ where
     state
 }
 
-pub fn encrypt_block<Ctx: ContextT>(
-    ctx: &Ctx,
-    expanded_key: &[Word<Ctx::Bit>; 44],
-    block: Block<Ctx::Bit>,
-) -> Block<Ctx::Bit>
-where
-    Ctx::Bit: BitT,
-    Byte<Ctx::Bit>: ByteT,
-{
-    encrypt_block_for_rounds(ctx, expanded_key, block, ROUNDS)
-}
-
 pub fn encrypt_block_for_rounds<Ctx: ContextT>(
     ctx: &Ctx,
     expanded_key: &[Word<Ctx::Bit>; 44],
@@ -121,7 +101,7 @@ where
 {
     let mut state = State::from_array(block);
 
-    xor_state(
+    data_model::xor_state(
         &mut state,
         expanded_key[0..4].try_into().expect("array length 4"),
     );
@@ -132,12 +112,12 @@ where
         let mut state_muls = sub_bytes_with_gal_mul(state);
         debug!("shift_rows");
         for state in &mut state_muls {
-            shift_rows(state);
+            data_model::shift_rows(state);
         }
         debug!("mix_columns");
         state = mix_columns(ctx, state_muls);
         debug!("xor_state");
-        xor_state(
+        data_model::xor_state(
             &mut state,
             expanded_key[i * 4..(i + 1) * 4]
                 .try_into()
@@ -149,9 +129,9 @@ where
     debug!("sub_bytes");
     sub_bytes(&mut state);
     debug!("shift_rows");
-    shift_rows(&mut state);
+    data_model::shift_rows(&mut state);
     debug!("xor_state");
-    xor_state(
+    data_model::xor_state(
         &mut state,
         expanded_key[40..44].try_into().expect("array length 4"),
     );
