@@ -30,19 +30,17 @@ impl ByteT for Byte<BitCt> {
     fn aes_substitute(&self) -> Self {
         let context = &self.bits().find_first(|_| true).unwrap().context;
 
-        static SBOX_LUT: OnceLock<[WopbsLUTBase; 8]> = OnceLock::new();
+        static SBOX_LUT: OnceLock<WopbsLUTBase> = OnceLock::new();
         let lut = SBOX_LUT.get_or_init(|| {
-            array::from_fn(|i| {
-                context.generate_multivariate_lookup_table(8, |byte| {
-                    Cleartext(util::byte_to_bits(SBOX[byte as usize])[i] as u64)
-                })
-            })
+            context.generate_multivariate_multivalued_lookup_table(8, 8, |byte| SBOX[byte as usize])
         });
 
-        let new_bits = util::par_collect_array((0..8).into_par_iter().map(|i| {
-            let new_bit = context.circuit_bootstrap(&self.0.each_ref(), &lut[i]);
-            context.extract_bit_from_bit(&new_bit)
-        }));
+        let new_dual_bits = context.circuit_bootstrap_multivalued(&self.0.each_ref(), &lut);
+        let new_bits: [BitCt; 8] = util::par_collect_array(
+            new_dual_bits
+                .into_par_iter()
+                .map(|dual_bit| context.extract_bit_from_bit(&dual_bit)),
+        );
 
         Self(new_bits)
     }
