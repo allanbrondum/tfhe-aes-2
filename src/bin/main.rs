@@ -17,6 +17,7 @@ use tfhe_aes::tfhe::{
 };
 use tracing::debug;
 use tracing::metadata::LevelFilter;
+use tfhe_aes::aes_128::fhe::fhe_sbox_gal_mul_pbs_impls::shortint_woppbs_1bit::ShortintWoppbs1BitSboxGalMulPbsAesEncrypt;
 
 #[derive(Debug, Clone, ValueEnum)]
 #[clap(rename_all = "kebab-case")]
@@ -79,8 +80,8 @@ fn main() -> anyhow::Result<()> {
             );
         }
         Implementation::ShortintWoppbs1bit => {
-            let (client_key, context) = shortint_woppbs_1bit::FheContext::generate_keys_lvl_11();
-            run_client_server_aes_scenario::<ShortintWoppbs1BitSboxPbsAesEncrypt, _>(
+            let (client_key, context) = shortint_woppbs_1bit::FheContext::generate_keys_lvl_5();
+            run_client_server_aes_scenario::<ShortintWoppbs1BitSboxGalMulPbsAesEncrypt, _>(
                 &client_key,
                 &context,
                 key,

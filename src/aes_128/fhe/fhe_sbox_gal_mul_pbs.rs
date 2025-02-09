@@ -161,12 +161,8 @@ where
             expanded_key[i] = expanded_key[i - 4].clone() ^ &expanded_key[i - 1];
         }
 
-        // bootstrap all words to control noise level
-        if i % 4 == 3 {
-            expanded_key[i - 3..=i].par_iter_mut().for_each(|word| {
-                boot_word(word);
-            });
-        }
+        // bootstrap words to control noise level
+        boot_word(&mut expanded_key[i]);
     }
 
     expanded_key
