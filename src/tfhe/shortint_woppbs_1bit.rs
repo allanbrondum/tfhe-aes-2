@@ -36,14 +36,13 @@ use tracing::debug;
 /// - 7 :   4,  9,  661,    3, 12,     6,  2,     2,  9,     2, 16,    353, 5.3e-20
 /// ...
 /// ```
-fn params_() -> ShortintParameterSet {
-    // todo
+fn params_lvl_11() -> ShortintParameterSet {
     let wopbs_params = WopbsParameters {
         lwe_dimension: LweDimension(661),
         glwe_dimension: GlweDimension(4),
         polynomial_size: PolynomialSize(512),
         lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            6.676348397087967e-05,
+            6.676348397087967e-5,
         )),
         glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
             2.845267479601915e-15,
@@ -88,13 +87,27 @@ fn params_() -> ShortintParameterSet {
 
 // todo simplify model
 
-fn params() -> ShortintParameterSet {
+/// Parameters created from
+///
+/// ```text
+/// ./optimizer  --min-precision 1 --max-precision 1 --p-error 5.42101086e-20 --ciphertext-modulus-log 64 --wop-pbs
+/// security level: 128
+/// target p_error: 5.4e-20
+/// per precision and log norm2:
+///
+/// - 1: # bits
+/// -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b, cb_l,cb_b, pp_l,pp_b,  cost, p_error
+/// ...
+/// - 4 :   2, 10,  665,    4,  9,     6,  2,     1, 14,     3, 12,    218, 4.5e-2
+/// ...
+/// ```
+fn params_lvl_4() -> ShortintParameterSet {
     let wopbs_params = WopbsParameters {
         lwe_dimension: LweDimension(665),
         glwe_dimension: GlweDimension(2),
         polynomial_size: PolynomialSize(1024),
         lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            6.676348397087967e-05,
+            6.676348397087967e-05, // todo noise
         )),
         glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
             2.845267479601915e-15,
@@ -128,7 +141,7 @@ fn params() -> ShortintParameterSet {
         ks_level: wopbs_params.ks_level,
         message_modulus: wopbs_params.message_modulus,
         carry_modulus: wopbs_params.carry_modulus,
-        max_noise_level: MaxNoiseLevel::new(11),
+        max_noise_level: MaxNoiseLevel::new(4),
         log2_p_fail: -64.074,
         ciphertext_modulus: wopbs_params.ciphertext_modulus,
         encryption_key_choice: wopbs_params.encryption_key_choice,
@@ -283,8 +296,14 @@ impl ClientKeyT for ClientKey {
 }
 
 impl FheContext {
-    pub fn generate_keys() -> (ClientKey, Self) {
-        Self::generate_keys_with_params(params())
+    /// Model allowing 11 (max noise level) leveled operations
+    pub fn generate_keys_lvl_11() -> (ClientKey, Self) {
+        Self::generate_keys_with_params(params_lvl_11())
+    }
+
+    /// Model allowing 4 (max noise level) leveled operations
+    pub fn generate_keys_lvl_4() -> (ClientKey, Self) {
+        Self::generate_keys_with_params(params_lvl_4())
     }
 
     fn generate_keys_with_params(params: ShortintParameterSet) -> (ClientKey, Self) {
@@ -314,13 +333,11 @@ impl FheContext {
     /// output (the least significant bits) in the given function. When the returned LUT is used with [`Self::circuit_bootstrap`], the same number of input
     /// bits should be given, and the number of "dual" ciphertexts returned is the same as the number of output bits
     /// specified in the LUT.
-    ///
-    /// Current implementation supports up to 8 bits, but the implementation can be changed to support more bits if needed.
     pub fn generate_lookup_table(
         &self,
         input_bits: usize,
         output_bits: usize,
-        f: impl Fn(u8) -> u8,
+        f: impl Fn(u16) -> u64,
     ) -> WopbsLUTBase {
         generate_multivariate_luts(
             input_bits,
@@ -405,10 +422,13 @@ fn generate_multivariate_luts(
     input_bits: usize,
     output_bits: usize,
     polynomial_size: PolynomialSize,
-    f: impl Fn(u8) -> u8,
+    f: impl Fn(u16) -> u64,
 ) -> WopbsLUTBase {
-    assert!(0 < input_bits && input_bits <= 8);
-    assert!(0 < output_bits && output_bits <= 8);
+    // Current implementation only packs one polynomial per output. We can pack more if needed,
+    // see lwe_wopbs::circuit_bootstrap_boolean_vertical_packing_lwe_ciphertext_list_mem_optimized
+    assert!((1 << input_bits) <= polynomial_size.0);
+    assert!(0 < input_bits && input_bits <= 16);
+    assert!(0 < output_bits && output_bits <= 64);
 
     let mut lut = WopbsLUTBase::new(
         PlaintextCount(polynomial_size.0),
@@ -425,9 +445,8 @@ fn generate_multivariate_luts(
             .enumerate()
             .take(1 << input_bits)
         {
-            assert!(val < 256);
             *value = encode_bit(Cleartext(
-                util::byte_to_bits(f(val as u8))[output_bit + 8 - output_bits] as u64,
+                util::u64_to_bits(f(val as u16))[output_bit + 64 - output_bits] as u64,
             ))
             .0;
         }
@@ -445,10 +464,13 @@ pub mod test {
     use std::sync::{Arc, LazyLock};
     use tracing::level_filters::LevelFilter;
 
-    pub static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(keys_impl);
+    pub static KEYS_LVL_4: LazyLock<(Arc<ClientKey>, FheContext)> =
+        LazyLock::new(|| keys_impl(params_lvl_4()));
+    pub static KEYS_LVL_11: LazyLock<(Arc<ClientKey>, FheContext)> =
+        LazyLock::new(|| keys_impl(params_lvl_11()));
 
-    fn keys_impl() -> (Arc<ClientKey>, FheContext) {
-        let (client_key, context) = FheContext::generate_keys();
+    fn keys_impl(params: ShortintParameterSet) -> (Arc<ClientKey>, FheContext) {
+        let (client_key, context) = FheContext::generate_keys_with_params(params);
         (client_key.into(), context)
     }
 
@@ -470,7 +492,7 @@ pub mod test {
 
     #[test]
     fn test_bit() {
-        let (client_key, context) = KEYS.clone();
+        let (client_key, context) = KEYS_LVL_4.clone();
 
         let b1 = client_key.encrypt(Cleartext(0));
         let b2 = client_key.encrypt(Cleartext(1));
@@ -517,27 +539,28 @@ pub mod test {
         test_multivariate_parity_fn_impl(8, 0b11011001);
     }
 
-    fn test_multivariate_parity_fn_impl(bits: usize, byte: u8) {
-        let (client_key, context) = KEYS.clone();
+    fn test_multivariate_parity_fn_impl(bits: usize, word: u16) {
+        let (client_key, context) = KEYS_LVL_4.clone();
 
-        let parity_fn = |val: u8| -> u8 { util::byte_to_bits(val).iter().sum::<u8>() % 2 };
+        let parity_fn =
+            |val: u16| -> u64 { (util::u16_to_bits(val).iter().sum::<u8>() % 2) as u64 };
 
         // println!("parity {}", parity_fn(byte).0);
 
-        let bit_cts = util::byte_to_bits(byte).map(|bit| client_key.encrypt(Cleartext(bit as u64)));
+        let bit_cts = util::u16_to_bits(word).map(|bit| client_key.encrypt(Cleartext(bit as u64)));
 
         // let bits_cl:Vec<_> = bit_cts.each_ref()[8 - bits..].iter().map(|ct| client_key.decrypt(&ct)).collect();
         // println!("bits {:?}", bits_cl);
 
         let tv = context.generate_lookup_table(bits, 1, parity_fn);
         let d = context
-            .circuit_bootstrap(&bit_cts.each_ref()[8 - bits..], &tv)
+            .circuit_bootstrap(&bit_cts.each_ref()[16 - bits..], &tv)
             .into_iter()
             .next()
             .expect("one bit");
         let d = context.extract_bit_from_dual_ciphertext(&d);
 
-        assert_eq!(client_key.decrypt(&d).0 as u8, parity_fn(byte));
+        assert_eq!(client_key.decrypt(&d).0, parity_fn(word));
     }
 
     #[test]
@@ -560,32 +583,30 @@ pub mod test {
         test_multivariate_multivalued_square_fn_impl(8, 0b11011001);
     }
 
-    fn test_multivariate_multivalued_square_fn_impl(bits: usize, byte: u8) {
-        let (client_key, context) = KEYS.clone();
+    fn test_multivariate_multivalued_square_fn_impl(bits: usize, byte: u16) {
+        let (client_key, context) = KEYS_LVL_4.clone();
 
-        let square_fn = |val: u8| -> u8 { val * val % (1 << bits) };
+        let square_fn = |val: u16| -> u64 { (val * val % (1 << bits)) as u64 };
 
-        // println!("parity {}", parity_fn(byte).0);
-
-        let bit_cts = util::byte_to_bits(byte).map(|bit| client_key.encrypt(Cleartext(bit as u64)));
+        let bit_cts = util::u16_to_bits(byte).map(|bit| client_key.encrypt(Cleartext(bit as u64)));
 
         // let bits_cl:Vec<_> = bit_cts.each_ref()[8 - bits..].iter().map(|ct| client_key.decrypt(&ct)).collect();
         // println!("bits {:?}", bits_cl);
 
         let tv = context.generate_lookup_table(bits, bits, square_fn);
-        let out = context.circuit_bootstrap(&bit_cts.each_ref()[8 - bits..], &tv);
+        let out = context.circuit_bootstrap(&bit_cts.each_ref()[16 - bits..], &tv);
 
         let out_clear: Vec<_> = out
             .into_iter()
             .map(|d| client_key.decrypt(&context.extract_bit_from_dual_ciphertext(&d)))
             .collect();
-        let out_bits: [u8; 8] = array::from_fn(|i| {
+        let out_bits: [u8; 64] = array::from_fn(|i| {
             out_clear
-                .get(i - 8 + bits)
+                .get(i - 64 + bits)
                 .map(|bit| bit.0 as u8)
                 .unwrap_or_default()
         });
-        let out_byte = util::bits_to_byte(out_bits);
+        let out_byte = util::bits_to_u64(out_bits);
 
         assert_eq!(out_byte, square_fn(byte));
     }

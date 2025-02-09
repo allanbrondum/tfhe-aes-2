@@ -30,12 +30,43 @@ pub fn shl_array<const N: usize, T: Default>(array: &mut [T; N], shl: usize) {
     }
 }
 
-pub fn byte_to_bits(byte: u8) -> [u8; 8] {
+pub fn u8_to_bits(byte: u8) -> [u8; 8] {
     array::from_fn(|i| if 0 == (byte & (0x80 >> i)) { 0 } else { 1 })
 }
 
-pub fn bits_to_byte(bits: [u8; 8]) -> u8 {
-    bits.iter().enumerate().map(|(i, bit)| bit << (7 - i)).sum()
+pub fn bits_to_u8(bits: [u8; 8]) -> u8 {
+    bits.into_iter()
+        .enumerate()
+        .map(|(i, bit)| bit << (7 - i))
+        .sum()
+}
+
+pub fn u16_to_bits(word: u16) -> [u8; 16] {
+    array::from_fn(|i| if 0 == (word & (0x8000 >> i)) { 0 } else { 1 })
+}
+
+pub fn bits_to_u16(bits: [u8; 16]) -> u16 {
+    bits.into_iter()
+        .enumerate()
+        .map(|(i, bit)| (bit as u16) << (15 - i))
+        .sum()
+}
+
+pub fn u64_to_bits(word: u64) -> [u8; 64] {
+    array::from_fn(|i| {
+        if 0 == (word & (0x8000000000000000 >> i)) {
+            0
+        } else {
+            1
+        }
+    })
+}
+
+pub fn bits_to_u64(bits: [u8; 64]) -> u64 {
+    bits.into_iter()
+        .enumerate()
+        .map(|(i, bit)| (bit as u64) << (63 - i))
+        .sum()
 }
 
 #[cfg(test)]
@@ -58,14 +89,53 @@ mod test {
     }
 
     #[test]
-    fn test_byte_to_bits() {
-        let bits: [u8; 8] = byte_to_bits(0b01100011);
+    fn test_u8_to_bits() {
+        let bits: [u8; 8] = u8_to_bits(0b01100011);
         assert_eq!(bits, [0, 1, 1, 0, 0, 0, 1, 1]);
     }
 
     #[test]
-    fn test_bits_to_byte() {
-        let byte = bits_to_byte([0, 1, 1, 0, 0, 0, 1, 1]);
+    fn test_bits_to_u8() {
+        let byte = bits_to_u8([0, 1, 1, 0, 0, 0, 1, 1]);
         assert_eq!(byte, 0b01100011);
+    }
+
+    #[test]
+    fn test_u16_to_bits() {
+        let bits: [u8; 16] = u16_to_bits(0b1111000101100011);
+        assert_eq!(bits, [1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1]);
+    }
+
+    #[test]
+    fn test_bits_to_u16() {
+        let word = bits_to_u16([1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1]);
+        assert_eq!(word, 0b1111000101100011);
+    }
+
+    #[test]
+    fn test_u64_to_bits() {
+        let bits: [u8; 64] =
+            u64_to_bits(0b1111000101100011_0000000000000000_1111000101100011_0000000000000000);
+        assert_eq!(
+            bits,
+            [
+                1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0
+            ]
+        );
+    }
+
+    #[test]
+    fn test_bits_to_u64() {
+        let word = bits_to_u64([
+            1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0,
+        ]);
+        assert_eq!(
+            word,
+            0b1111000101100011_0000000000000000_1111000101100011_0000000000000000
+        );
     }
 }

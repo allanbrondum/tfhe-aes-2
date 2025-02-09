@@ -16,7 +16,7 @@ pub trait ByteT: Sized {
 
 use crate::aes_128::fhe::data_model;
 use crate::aes_128::fhe::data_model::{BitT, Block, Byte, State, Word};
-use crate::aes_128::{RC, ROUNDS};
+use crate::aes_128::RC;
 use crate::tfhe::ContextT;
 use crate::util;
 use itertools::Itertools;
@@ -24,8 +24,7 @@ use rayon::iter::IndexedParallelIterator;
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use std::array;
-use std::fmt::Debug;
-use std::ops::BitXorAssign;
+
 use tracing::debug;
 
 /// SubBytes step in AES composed with Galois multiplication for MixColumns
@@ -63,16 +62,13 @@ where
 }
 
 /// MixColumns step in AES
-fn mix_columns<Ctx: ContextT>(ctx: &Ctx, state_muls: [State<Ctx::Bit>; 3]) -> State<Ctx::Bit>
-where
-    Ctx::Bit: BitT,
-{
-    let new_columns: [Word<Ctx::Bit>; 4] = util::par_collect_array(
+fn mix_columns<Bit: BitT>(state_muls: [State<Bit>; 3]) -> State<Bit> {
+    let new_columns: [Word<Bit>; 4] = util::par_collect_array(
         state_muls[0]
             .columns()
             .zip_eq(state_muls[1].columns())
             .zip_eq(state_muls[2].columns())
-            .map(|(((column_mul1, column_mul2), column_mul3))| {
+            .map(|((column_mul1, column_mul2), column_mul3)| {
                 Word::new(util::par_collect_array((0..4).into_par_iter().map(|i| {
                     column_mul2[i].clone()
                         ^ &column_mul1[(i - 1) % 4]
@@ -90,7 +86,7 @@ where
 }
 
 pub fn encrypt_block_for_rounds<Ctx: ContextT>(
-    ctx: &Ctx,
+    _ctx: &Ctx,
     expanded_key: &[Word<Ctx::Bit>; 44],
     block: Block<Ctx::Bit>,
     rounds: usize,
@@ -115,7 +111,7 @@ where
             data_model::shift_rows(state);
         }
         debug!("mix_columns");
-        state = mix_columns(ctx, state_muls);
+        state = mix_columns(state_muls);
         debug!("xor_state");
         data_model::xor_state(
             &mut state,

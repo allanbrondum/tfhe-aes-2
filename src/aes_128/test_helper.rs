@@ -1,10 +1,8 @@
 use std::time::Instant;
 
 use crate::aes_128;
-use crate::aes_128::fhe::data_model::BitT;
 use crate::aes_128::fhe::data_model::{Block, Byte, Word};
-use crate::aes_128::fhe::fhe_sbox_pbs::ByteT;
-use crate::aes_128::fhe::{fhe_encryption, fhe_sbox_pbs, Aes128Encrypt};
+use crate::aes_128::fhe::{fhe_encryption, Aes128Encrypt};
 use crate::aes_128::{aes_lib, plain, ROUNDS};
 use crate::tfhe::{ClientKeyT, ContextT};
 use rand::{Rng, SeedableRng};

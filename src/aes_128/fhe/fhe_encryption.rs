@@ -31,7 +31,7 @@ pub fn encrypt_byte_array<const N: usize, CK: ClientKeyT>(
 }
 
 pub fn encrypt_byte<CK: ClientKeyT>(client_key: &CK, byte: u8) -> Byte<CK::Bit> {
-    Byte::new(util::byte_to_bits(byte).map(|b| client_key.encrypt(Cleartext(b as u64))))
+    Byte::new(util::u8_to_bits(byte).map(|b| client_key.encrypt(Cleartext(b as u64))))
 }
 
 pub fn decrypt_blocks<CK: ClientKeyT>(
@@ -61,5 +61,5 @@ pub fn decrypt_byte_array<const N: usize, CK: ClientKeyT>(
 }
 
 pub fn decrypt_byte<CK: ClientKeyT>(client_key: &CK, byte: &Byte<CK::Bit>) -> u8 {
-    util::bits_to_byte(byte.0.each_ref().map(|bit| client_key.decrypt(bit).0 as u8))
+    util::bits_to_u8(byte.0.each_ref().map(|bit| client_key.decrypt(bit).0 as u8))
 }

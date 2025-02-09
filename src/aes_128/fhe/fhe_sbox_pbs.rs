@@ -4,15 +4,14 @@
 use crate::aes_128::fhe::data_model;
 use crate::aes_128::fhe::data_model::{BitT, Block};
 use crate::aes_128::fhe::data_model::{Byte, State, Word};
-use crate::aes_128::{RC, ROUNDS};
+use crate::aes_128::RC;
 use crate::tfhe::ContextT;
 use crate::util;
-use rayon::iter::IndexedParallelIterator;
+
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use std::array;
-use std::fmt::Debug;
-use std::ops::BitXorAssign;
+
 use tracing::debug;
 
 pub trait ByteT: Sized {

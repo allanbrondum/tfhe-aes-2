@@ -714,12 +714,12 @@ pub mod test {
         let (client_key, context) = KEYS.clone();
 
         let parity_fn = |index: u8| -> Cleartext<u64> {
-            Cleartext((util::byte_to_bits(index).iter().sum::<u8>() % 2) as u64)
+            Cleartext((util::u8_to_bits(index).iter().sum::<u8>() % 2) as u64)
         };
 
         // println!("parity {}", parity_fn(byte).0);
 
-        let bit_cts = util::byte_to_bits(byte).map(|bit| client_key.encrypt(Cleartext(bit as u64)));
+        let bit_cts = util::u8_to_bits(byte).map(|bit| client_key.encrypt(Cleartext(bit as u64)));
 
         // let bits_cl:Vec<_> = bit_cts.each_ref()[8 - bits..].iter().map(|ct| client_key.decrypt(&ct)).collect();
         // println!("bits {:?}", bits_cl);

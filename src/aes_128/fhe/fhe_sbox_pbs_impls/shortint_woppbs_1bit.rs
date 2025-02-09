@@ -19,7 +19,8 @@ impl ByteT for Byte<BitCt> {
         let context = &self.bits().find_first(|_| true).unwrap().context.clone();
 
         static IDENTITY_LUT: OnceLock<WopbsLUTBase> = OnceLock::new();
-        let lut = IDENTITY_LUT.get_or_init(|| context.generate_lookup_table(1, 1, |bit| bit));
+        let lut =
+            IDENTITY_LUT.get_or_init(|| context.generate_lookup_table(1, 1, |bit| bit as u64));
 
         self.bits_mut().for_each(|bit| {
             let new_bit = context
@@ -36,9 +37,9 @@ impl ByteT for Byte<BitCt> {
 
         static SBOX_LUT: OnceLock<WopbsLUTBase> = OnceLock::new();
         let lut = SBOX_LUT
-            .get_or_init(|| context.generate_lookup_table(8, 8, |byte| SBOX[byte as usize]));
+            .get_or_init(|| context.generate_lookup_table(8, 8, |byte| SBOX[byte as usize] as u64));
 
-        let new_dual_bits = context.circuit_bootstrap(&self.0.each_ref(), &lut);
+        let new_dual_bits = context.circuit_bootstrap(&self.0.each_ref(), lut);
         let new_bits: [BitCt; 8] = util::par_collect_array(
             new_dual_bits
                 .into_par_iter()
@@ -84,7 +85,7 @@ mod test {
     fn test_light() {
         logger::test_init(LevelFilter::INFO);
 
-        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS.clone();
+        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_LVL_11.clone();
 
         test_helper::test_light::<ShortintWoppbs1BitSboxPbsAesEncrypt, _>(
             client_key.as_ref(),
@@ -97,7 +98,7 @@ mod test {
     fn test_full() {
         logger::test_init(LevelFilter::INFO);
 
-        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS.clone();
+        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_LVL_11.clone();
 
         test_helper::test_full::<ShortintWoppbs1BitSboxPbsAesEncrypt, _>(client_key.as_ref(), &ctx);
     }

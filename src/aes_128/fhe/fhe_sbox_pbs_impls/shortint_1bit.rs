@@ -34,7 +34,7 @@ impl ByteT for Byte<BitCt> {
         let lut = SBOX_LUT.get_or_init(|| {
             array::from_fn(|i| {
                 shortint_1bit::generate_multivariate_test_vector(context, 8, |byte| {
-                    Cleartext(util::byte_to_bits(SBOX[byte as usize])[i] as u64)
+                    Cleartext(util::u8_to_bits(SBOX[byte as usize])[i] as u64)
                 })
             })
         });

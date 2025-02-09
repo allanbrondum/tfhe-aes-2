@@ -4,16 +4,14 @@ use clap::{Parser, ValueEnum};
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
 use std::time::Instant;
-use tfhe_aes::aes_128::fhe::data_model::{BitT, Block, Byte, Word};
-use tfhe_aes::aes_128::{aes_lib, fhe::fhe_encryption, fhe::fhe_sbox_gal_mul_pbs};
+use tfhe_aes::aes_128::fhe::data_model::{Block, Byte, Word};
+use tfhe_aes::aes_128::{aes_lib, fhe::fhe_encryption};
 use tfhe_aes::{aes_128, logger};
 
-use tfhe_aes::aes_128::fhe::fhe_sbox_gal_mul_pbs_impls::shortint_woppbs_1bit::ShortintWoppbs1BitSboxGalMulPbsAesEncrypt;
-use tfhe_aes::aes_128::fhe::fhe_sbox_pbs::ByteT;
 use tfhe_aes::aes_128::fhe::fhe_sbox_pbs_impls::shortint_1bit::Shortint1BitSboxPbsAesEncrypt;
 use tfhe_aes::aes_128::fhe::fhe_sbox_pbs_impls::shortint_woppbs_1bit::ShortintWoppbs1BitSboxPbsAesEncrypt;
 use tfhe_aes::aes_128::fhe::fhe_sbox_pbs_impls::shortint_woppbs_8bit::ShortintWoppbs8BitSboxPbsAesEncrypt;
-use tfhe_aes::aes_128::fhe::{fhe_sbox_pbs, Aes128Encrypt};
+use tfhe_aes::aes_128::fhe::Aes128Encrypt;
 use tfhe_aes::tfhe::{
     shortint_1bit, shortint_woppbs_1bit, shortint_woppbs_8bit, ClientKeyT, ContextT,
 };
@@ -81,7 +79,7 @@ fn main() -> anyhow::Result<()> {
             );
         }
         Implementation::ShortintWoppbs1bit => {
-            let (client_key, context) = shortint_woppbs_1bit::FheContext::generate_keys();
+            let (client_key, context) = shortint_woppbs_1bit::FheContext::generate_keys_lvl_11();
             run_client_server_aes_scenario::<ShortintWoppbs1BitSboxPbsAesEncrypt, _>(
                 &client_key,
                 &context,
