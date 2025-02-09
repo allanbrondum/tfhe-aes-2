@@ -31,6 +31,70 @@ use tracing::debug;
 /// - 1: # bits
 /// -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b, cb_l,cb_b, pp_l,pp_b,  cost, p_error
 /// ...
+/// - 0 :   2, 10,  671,    2, 15,     4,  3,     1, 10,     1, 24,    111, 4.2e-20
+/// ...
+/// ```
+fn params_lvl_1() -> ShortintParameterSet {
+    let wopbs_params = WopbsParameters {
+        lwe_dimension: LweDimension(671),
+        glwe_dimension: GlweDimension(2),
+        polynomial_size: PolynomialSize(1024),
+        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            6.676348397087967e-05,
+        )),
+        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            0.00000000000000022148688116005568,
+        )),
+        pbs_level: DecompositionLevelCount(2),
+        pbs_base_log: DecompositionBaseLog(15),
+        ks_level: DecompositionLevelCount(4),
+        ks_base_log: DecompositionBaseLog(3),
+        cbs_level: DecompositionLevelCount(1),
+        cbs_base_log: DecompositionBaseLog(10),
+        pfks_level: DecompositionLevelCount(1),
+        pfks_base_log: DecompositionBaseLog(24),
+        pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            0.00000000000000022148688116005568,
+        )),
+        message_modulus: MessageModulus(2),
+        carry_modulus: CarryModulus(1),
+        ciphertext_modulus: CiphertextModulus::new_native(),
+        encryption_key_choice: EncryptionKeyChoice::Big,
+    };
+
+    let pbs_params = ClassicPBSParameters {
+        lwe_dimension: wopbs_params.lwe_dimension,
+        glwe_dimension: wopbs_params.glwe_dimension,
+        polynomial_size: wopbs_params.polynomial_size,
+        lwe_noise_distribution: wopbs_params.lwe_noise_distribution,
+        glwe_noise_distribution: wopbs_params.glwe_noise_distribution,
+        pbs_base_log: wopbs_params.pbs_base_log,
+        pbs_level: wopbs_params.pbs_level,
+        ks_base_log: wopbs_params.ks_base_log,
+        ks_level: wopbs_params.ks_level,
+        message_modulus: wopbs_params.message_modulus,
+        carry_modulus: wopbs_params.carry_modulus,
+        max_noise_level: MaxNoiseLevel::new(5),
+        log2_p_fail: -64.074,
+        ciphertext_modulus: wopbs_params.ciphertext_modulus,
+        encryption_key_choice: wopbs_params.encryption_key_choice,
+    };
+
+    ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
+}
+
+
+/// Parameters created from
+///
+/// ```text
+/// ./optimizer  --min-precision 1 --max-precision 1 --p-error 5.42101086e-20 --ciphertext-modulus-log 64 --wop-pbs
+/// security level: 128
+/// target p_error: 5.4e-20
+/// per precision and log norm2:
+///
+/// - 1: # bits
+/// -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b, cb_l,cb_b, pp_l,pp_b,  cost, p_error
+/// ...
 /// - 5 :   2, 10,  649,    6,  7,     6,  2,     1, 15,     3, 12,    268, 4.8e-20
 /// ...
 /// ```
@@ -254,15 +318,21 @@ impl ClientKeyT for ClientKey {
 }
 
 impl FheContext {
-    /// Model allowing 11 (max noise level) leveled operations
-    pub fn generate_keys_lvl_11() -> (ClientKey, Self) {
-        Self::generate_keys_with_params(params_lvl_11())
+    /// Model allowing 1 (max noise level) leveled operations
+    pub fn generate_keys_lvl_1() -> (ClientKey, Self) {
+        Self::generate_keys_with_params(params_lvl_1())
     }
 
     /// Model allowing 5 (max noise level) leveled operations
     pub fn generate_keys_lvl_5() -> (ClientKey, Self) {
         Self::generate_keys_with_params(params_lvl_5())
     }
+
+    /// Model allowing 11 (max noise level) leveled operations
+    pub fn generate_keys_lvl_11() -> (ClientKey, Self) {
+        Self::generate_keys_with_params(params_lvl_11())
+    }
+
 
     fn generate_keys_with_params(params: ShortintParameterSet) -> (ClientKey, Self) {
         let (shortint_client_key, server_key) = shortint::gen_keys(params);
@@ -373,14 +443,16 @@ fn generate_multivariate_luts(
     polynomial_size: PolynomialSize,
     f: impl Fn(u16) -> u64,
 ) -> WopbsLUTBase {
-    // Current implementation only packs one polynomial per output. We can pack more if needed,
-    // see lwe_wopbs::circuit_bootstrap_boolean_vertical_packing_lwe_ciphertext_list_mem_optimized
-    assert!((1 << input_bits) <= polynomial_size.0);
     assert!(0 < input_bits && input_bits <= 16);
     assert!(0 < output_bits && output_bits <= 64);
 
+    let polynomial_size_log = polynomial_size.0.ilog2();
+    assert_eq!(polynomial_size.0, 1 << polynomial_size_log);
+
+    let polynomial_tree_bits = (input_bits as u32).saturating_sub(polynomial_size_log);
+
     let mut lut = WopbsLUTBase::new(
-        PlaintextCount(polynomial_size.0),
+        PlaintextCount(polynomial_size.0 << polynomial_tree_bits),
         CiphertextCount(output_bits),
     );
 
@@ -426,6 +498,9 @@ pub mod test {
     use crate::{logger, util};
     use std::sync::{Arc, LazyLock};
     use tracing::level_filters::LevelFilter;
+
+    pub static KEYS_LVL_1: LazyLock<(Arc<ClientKey>, FheContext)> =
+        LazyLock::new(|| keys_impl(params_lvl_1()));
 
     pub static KEYS_LVL_5: LazyLock<(Arc<ClientKey>, FheContext)> =
         LazyLock::new(|| keys_impl(params_lvl_5()));
@@ -576,5 +651,78 @@ pub mod test {
         logger::test_init(LevelFilter::DEBUG);
 
         test_multivariate_multivalued_square_fn_impl(8, 0b11001001);
+    }
+
+    #[test]
+    fn test_xor_8bit() {
+        logger::test_init(LevelFilter::DEBUG);
+
+        let (client_key, context) = KEYS_LVL_1.clone();
+
+        let b1 = 0b11000110;
+        let b2 = 0b10101010;
+        let word = u16::from_be_bytes([b1, b2]);
+
+        let xor_fn = |val: u16| -> u64 {
+            let [b1, b2] = val.to_be_bytes();
+            (b1 ^ b2) as u64
+        };
+
+        let bit_cts = util::u16_to_bits(word).map(|bit| client_key.encrypt(Cleartext(bit as u64)));
+
+        // let bits_cl:Vec<_> = bit_cts.each_ref()[8 - bits..].iter().map(|ct| client_key.decrypt(&ct)).collect();
+        // println!("bits {:?}", bits_cl);
+
+        let tv = context.generate_lookup_table(16, 8, xor_fn);
+        let out = context.circuit_bootstrap(&bit_cts.each_ref(), &tv);
+
+        let out_clear: Vec<_> = out.into_iter().map(|d| client_key.decrypt(&d)).collect();
+        let out_bits: [u8; 64] = array::from_fn(|i| {
+            out_clear
+                .get(i - 64 + 8)
+                .map(|bit| bit.0 as u8)
+                .unwrap_or_default()
+        });
+        let out_byte = util::bits_to_u64(out_bits);
+
+        assert_eq!(out_byte, xor_fn(word));
+    }
+
+    fn encode_bits<const N: usize>(bits: [u8; N]) -> [u64; N] {
+        bits.map(|b| encode_bit(Cleartext(b as u64)).0)
+    }
+
+    #[test]
+    fn test_generate_multivariate_luts_vertical_packing() {
+        let lut = generate_multivariate_luts(3, 2, PolynomialSize(16), |val| val as u64);
+        assert_eq!(lut.as_ref().len(), 16 * 2);
+        assert_eq!(
+            lut.get_small_lut(0),
+            &encode_bits([0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0])
+        );
+        assert_eq!(
+            lut.get_small_lut(1),
+            &encode_bits([0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0])
+        );
+    }
+
+    #[test]
+    fn test_generate_multivariate_luts_multipolynomial_vertical_packing() {
+        let lut = generate_multivariate_luts(5, 2, PolynomialSize(8), |val| val as u64);
+        assert_eq!(lut.as_ref().len(), 8 * 4 * 2);
+        assert_eq!(
+            lut.get_small_lut(0),
+            &encode_bits([
+                0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1,
+                0, 0, 1, 1
+            ])
+        );
+        assert_eq!(
+            lut.get_small_lut(1),
+            &encode_bits([
+                0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,
+                0, 1, 0, 1
+            ])
+        );
     }
 }
