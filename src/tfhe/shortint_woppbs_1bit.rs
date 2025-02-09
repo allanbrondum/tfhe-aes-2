@@ -39,10 +39,10 @@ fn params() -> ShortintParameterSet {
         glwe_dimension: GlweDimension(4),
         polynomial_size: PolynomialSize(512),
         lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            1.5140301927925663e-5,
+            6.676348397087967e-05,
         )),
         glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568,
+            2.845267479601915e-15,
         )),
         pbs_level: DecompositionLevelCount(3),
         pbs_base_log: DecompositionBaseLog(12),
@@ -53,7 +53,7 @@ fn params() -> ShortintParameterSet {
         pfks_level: DecompositionLevelCount(2),
         pfks_base_log: DecompositionBaseLog(16),
         pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568,
+            2.845267479601915e-15,
         )),
         message_modulus: MessageModulus(2),
         carry_modulus: CarryModulus(1),
@@ -82,7 +82,7 @@ fn params() -> ShortintParameterSet {
     ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
 }
 
-/// Ciphertext representing a single bit and encrypted for use in circuit bootstrapping
+/// Ciphertext representing a single bit and encrypted for use in circuit bootstrapping. Encrypted under LWE key
 #[derive(Clone)]
 pub struct BitCt {
     ct: LweCiphertextOwned<u64>,
@@ -160,6 +160,20 @@ impl BitXor for BitCt {
     fn bitxor(mut self, rhs: Self) -> Self::Output {
         self.bitxor_assign(&rhs);
         self
+    }
+}
+
+/// Ciphertext representing 1 bit encrypted for bit extraction but encrypted under the GLWE key and
+/// not the LWE key
+#[derive(Clone)]
+pub struct DualCiphertext {
+    pub ct: LweCiphertextOwned<u64>,
+    pub context: FheContext,
+}
+
+impl DualCiphertext {
+    pub fn new(ct: LweCiphertextOwned<u64>, context: FheContext) -> Self {
+        Self { ct, context }
     }
 }
 
@@ -241,22 +255,8 @@ impl FheContext {
         (client_key, context)
     }
 
-    pub fn generate_multivariate_lookup_table(
-        &self,
-        bits: usize,
-        f: impl Fn(u8) -> Cleartext<u64>,
-    ) -> WopbsLUTBase {
-        generate_multivariate_lut(
-            bits,
-            self.wopbs_key
-                .wopbs_server_key
-                .bootstrapping_key
-                .polynomial_size(),
-            f,
-        )
-    }
-
-    pub fn generate_multivariate_multivalued_lookup_table(
+    /// Generate lookup table for the given function considering the given number of bits
+    pub fn generate_lookup_table(
         &self,
         input_bits: usize,
         output_bits: usize,
@@ -273,45 +273,8 @@ impl FheContext {
         )
     }
 
-    /// Circuit bootstrap of 1 bit with multiple input bits
-    pub fn circuit_bootstrap(&self, bits: &[&BitCt], lut: &WopbsLUTBase) -> DualCiphertext {
-        let start = Instant::now();
-        assert_eq!(lut.output_ciphertext_count(), CiphertextCount(1));
-
-        let lwe_size = bits[0].ct.lwe_size();
-
-        let mut bits_data =
-            Vec::with_capacity(bits.iter().map(|bit_ct| bit_ct.ct.as_ref().len()).sum());
-        for bit_ct in bits {
-            bits_data.extend(bit_ct.ct.as_ref());
-        }
-
-        let bits_list_ct = LweCiphertextListOwned::create_from(
-            bits_data,
-            LweCiphertextListCreationMetadata {
-                lwe_size,
-                ciphertext_modulus: CiphertextModulus::new_native(),
-            },
-        );
-
-        let lwe_ct = self
-            .wopbs_key
-            .circuit_bootstrapping_vertical_packing(lut, &bits_list_ct)
-            .into_iter()
-            .next()
-            .expect("one element");
-
-        debug!("(single value) circuit bootstrap {:?}", start.elapsed());
-
-        DualCiphertext::new(lwe_ct, self.clone())
-    }
-
     /// Circuit bootstrap of multiple bits with multiple input bits
-    pub fn circuit_bootstrap_multivalued(
-        &self,
-        bits: &[&BitCt],
-        lut: &WopbsLUTBase,
-    ) -> Vec<DualCiphertext> {
+    pub fn circuit_bootstrap(&self, bits: &[&BitCt], lut: &WopbsLUTBase) -> Vec<DualCiphertext> {
         let start = Instant::now();
 
         let lwe_size = bits[0].ct.lwe_size();
@@ -343,7 +306,7 @@ impl FheContext {
     }
 
     /// Extract the single bit from the "dual" ciphertext. This is effectively just a keyswitch
-    pub fn extract_bit_from_bit(&self, ct: &DualCiphertext) -> BitCt {
+    pub fn extract_bit_from_dual_bit(&self, ct: &DualCiphertext) -> BitCt {
         let start = Instant::now();
 
         let shortint_ct = shortint::Ciphertext::new(
@@ -377,24 +340,6 @@ impl FheContext {
     }
 }
 
-fn generate_multivariate_lut(
-    bits: usize,
-    polynomial_size: PolynomialSize,
-    f: impl Fn(u8) -> Cleartext<u64>,
-) -> WopbsLUTBase {
-    assert!(0 < bits && bits <= 8);
-
-    let mut lut = WopbsLUTBase::new(PlaintextCount(polynomial_size.0), CiphertextCount(1));
-
-    let mut lut_slice = lut.get_small_lut_mut(0);
-    for (val, value) in lut_slice.iter_mut().enumerate().take(1 << bits) {
-        assert!(val < 256);
-        *value = encode_bit(f(val as u8)).0;
-    }
-
-    lut
-}
-
 fn generate_multivariate_luts(
     input_bits: usize,
     output_bits: usize,
@@ -425,20 +370,6 @@ fn generate_multivariate_luts(
     }
 
     lut
-}
-
-/// Ciphertext representing 1 bit encrypted for bit extraction but encrypted under the GLWE key and
-/// not the LWE key
-#[derive(Clone)]
-pub struct DualCiphertext {
-    pub ct: LweCiphertextOwned<u64>,
-    pub context: FheContext,
-}
-
-impl DualCiphertext {
-    pub fn new(ct: LweCiphertextOwned<u64>, context: FheContext) -> Self {
-        Self { ct, context }
-    }
 }
 
 #[cfg(test)]
@@ -525,8 +456,8 @@ pub mod test {
     fn test_multivariate_parity_fn_impl(bits: usize, byte: u8) {
         let (client_key, context) = KEYS.clone();
 
-        let parity_fn = |val: u8| -> Cleartext<u64> {
-            Cleartext((util::byte_to_bits(val).iter().sum::<u8>() % 2) as u64)
+        let parity_fn = |val: u8| -> u8 {
+            util::byte_to_bits(val).iter().sum::<u8>() % 2
         };
 
         // println!("parity {}", parity_fn(byte).0);
@@ -536,11 +467,11 @@ pub mod test {
         // let bits_cl:Vec<_> = bit_cts.each_ref()[8 - bits..].iter().map(|ct| client_key.decrypt(&ct)).collect();
         // println!("bits {:?}", bits_cl);
 
-        let tv = context.generate_multivariate_lookup_table(bits, parity_fn);
-        let d = context.circuit_bootstrap(&bit_cts.each_ref()[8 - bits..], &tv);
-        let d = context.extract_bit_from_bit(&d);
+        let tv = context.generate_lookup_table(bits, 1, parity_fn);
+        let d = context.circuit_bootstrap(&bit_cts.each_ref()[8 - bits..], &tv).into_iter().next().expect("one bit");
+        let d = context.extract_bit_from_dual_bit(&d);
 
-        assert_eq!(client_key.decrypt(&d), parity_fn(byte));
+        assert_eq!(client_key.decrypt(&d).0 as u8, parity_fn(byte));
     }
 
     #[test]
@@ -575,12 +506,12 @@ pub mod test {
         // let bits_cl:Vec<_> = bit_cts.each_ref()[8 - bits..].iter().map(|ct| client_key.decrypt(&ct)).collect();
         // println!("bits {:?}", bits_cl);
 
-        let tv = context.generate_multivariate_multivalued_lookup_table(bits, bits, square_fn);
-        let out = context.circuit_bootstrap_multivalued(&bit_cts.each_ref()[8 - bits..], &tv);
+        let tv = context.generate_lookup_table(bits, bits, square_fn);
+        let out = context.circuit_bootstrap(&bit_cts.each_ref()[8 - bits..], &tv);
 
         let out_clear: Vec<_> = out
             .into_iter()
-            .map(|d| client_key.decrypt(&context.extract_bit_from_bit(&d)))
+            .map(|d| client_key.decrypt(&context.extract_bit_from_dual_bit(&d)))
             .collect();
         let out_bits: [u8; 8] = array::from_fn(|i| {
             out_clear

@@ -18,12 +18,12 @@ impl ByteT for Byte<BitCt> {
 
         static IDENTITY_LUT: OnceLock<WopbsLUTBase> = OnceLock::new();
         let lut = IDENTITY_LUT.get_or_init(|| {
-            context.generate_multivariate_lookup_table(1, |bit| Cleartext(bit as u64))
+            context.generate_lookup_table(1, 1, |bit| bit)
         });
 
         self.bits_mut().for_each(|bit| {
-            let new_bit = context.circuit_bootstrap(&[bit], lut);
-            *bit = context.extract_bit_from_bit(&new_bit);
+            let new_bit = context.circuit_bootstrap(&[bit], lut).into_iter().next().expect("one bit");
+            *bit = context.extract_bit_from_dual_bit(&new_bit);
         });
     }
 
@@ -32,14 +32,14 @@ impl ByteT for Byte<BitCt> {
 
         static SBOX_LUT: OnceLock<WopbsLUTBase> = OnceLock::new();
         let lut = SBOX_LUT.get_or_init(|| {
-            context.generate_multivariate_multivalued_lookup_table(8, 8, |byte| SBOX[byte as usize])
+            context.generate_lookup_table(8, 8, |byte| SBOX[byte as usize])
         });
 
-        let new_dual_bits = context.circuit_bootstrap_multivalued(&self.0.each_ref(), &lut);
+        let new_dual_bits = context.circuit_bootstrap(&self.0.each_ref(), &lut);
         let new_bits: [BitCt; 8] = util::par_collect_array(
             new_dual_bits
                 .into_par_iter()
-                .map(|dual_bit| context.extract_bit_from_bit(&dual_bit)),
+                .map(|dual_bit| context.extract_bit_from_dual_bit(&dual_bit)),
         );
 
         Self(new_bits)
