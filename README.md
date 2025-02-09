@@ -40,23 +40,23 @@ implemented by adding ciphertexts and letting them overflow.
 ### `shorint_woppbs_1bit`
 
 This model uses vertical packed circuit bootstrapping introduced in <https://eprint.iacr.org/2017/430.pdf> and implemented
-in the WoP-PBS experimental features in `tfhe-rs`. Additional primitives are implement in the library at hand to support
+in the WoP-PBS experimental features in `tfhe-rs`. Additional primitives are implemented in the library at hand to support
 multivariate and multivalued functions, but these higher level primitives still builds on the low-level primitives in `tfhe-rs`.
 
-As a comment, the effectiveness if this model could be improved by running the bootstrapping of GGSW ciphertexts in
+As a comment, the effectiveness if this model could be improved by running the boolean bootstrapping of GGSW ciphertexts in
 `fft64::crypto::wop_pbs::circuit_bootstrap_boolean` in parallel. 
 
 ### `shorint_woppbs_8bit`
 
 This model is similar to the 1bit model, but uses an 8-bit ciphertext space for circuit bootstrapping 
 (SBOX can then be evaluated on single ciphertexts). XOR is still performed on the 1-bit "dual" ciphertexts that are
-extracted from the 8-bit ciphertexts. This model though seems outperformed by the 1-bit multivariate, multivalued 1-bit ciphertext
+extracted from the 8-bit ciphertexts. This model though seems outperformed by the multivariate, multivalued 1-bit ciphertext
 bootstrapping in `shorint_woppbs_1bit`
 
 ### `shorint_1bit`
 
-Build on "plain" `tfhe-rs` shortint. Additional primitives are introduced to do multivariate (8-bit for SBOX)
-bootstrapping. The primitive implemented is a tree based bootstrap as described in
+Build on "plain" `tfhe-rs` shortint. And additional primitive is introduced to do multivariate (8-bit for SBOX)
+bootstrapping. The primitive is a tree based bootstrap as described in
 <https://tches.iacr.org/index.php/TCHES/article/view/8793/8393>. During implementation, the noise aggregation seemed
 hard to control though. And for the model to be effective, it would need further primitives in form of multivalued
 bootstrapping via factoring test vectors as described in <https://eprint.iacr.org/2018/622.pdf>.
