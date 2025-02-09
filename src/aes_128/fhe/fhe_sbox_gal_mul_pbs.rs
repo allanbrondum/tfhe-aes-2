@@ -22,7 +22,7 @@ use crate::util;
 use itertools::Itertools;
 use rayon::iter::IndexedParallelIterator;
 use rayon::iter::IntoParallelIterator;
-use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+use rayon::iter::ParallelIterator;
 use std::array;
 
 use tracing::debug;

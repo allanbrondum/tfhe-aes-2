@@ -4,13 +4,12 @@ use crate::aes_128::fhe::data_model::{Block, Byte, Word};
 use crate::aes_128::SBOX;
 use crate::tfhe::shortint_woppbs_1bit::*;
 
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::ParallelIterator;
 
 use crate::aes_128::fhe::data_model::BitT;
 use crate::aes_128::fhe::fhe_sbox_pbs::ByteT;
 use crate::aes_128::fhe::{fhe_sbox_pbs, Aes128Encrypt};
 use crate::tfhe::ContextT;
-use crate::util;
 use std::sync::OnceLock;
 use tfhe::shortint::wopbs::WopbsLUTBase;
 
@@ -23,12 +22,11 @@ impl ByteT for Byte<BitCt> {
             IDENTITY_LUT.get_or_init(|| context.generate_lookup_table(1, 1, |bit| bit as u64));
 
         self.bits_mut().for_each(|bit| {
-            let new_bit = context
+            *bit = context
                 .circuit_bootstrap(&[bit], lut)
                 .into_iter()
                 .next()
                 .expect("one bit");
-            *bit = context.extract_bit_from_dual_ciphertext(&new_bit);
         });
     }
 
@@ -39,12 +37,10 @@ impl ByteT for Byte<BitCt> {
         let lut = SBOX_LUT
             .get_or_init(|| context.generate_lookup_table(8, 8, |byte| SBOX[byte as usize] as u64));
 
-        let new_dual_bits = context.circuit_bootstrap(&self.0.each_ref(), lut);
-        let new_bits: [BitCt; 8] = util::par_collect_array(
-            new_dual_bits
-                .into_par_iter()
-                .map(|dual_bit| context.extract_bit_from_dual_ciphertext(&dual_bit)),
-        );
+        let new_bits = context
+            .circuit_bootstrap(&self.0.each_ref(), lut)
+            .try_into()
+            .expect("8 bits");
 
         Self(new_bits)
     }

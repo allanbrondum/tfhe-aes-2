@@ -5,6 +5,7 @@
 
 use crate::tfhe::{ClientKeyT, ContextT};
 
+use rayon::iter::IntoParallelRefIterator;
 use std::fmt::{Debug, Formatter};
 use std::ops::{BitXor, BitXorAssign};
 use std::sync::Arc;
@@ -13,8 +14,8 @@ use tfhe::core_crypto::prelude::*;
 use tfhe::shortint;
 use tfhe::shortint::ciphertext::{Degree, NoiseLevel};
 
-use crate::tfhe::engine::ShortintEngine;
 use crate::util;
+use rayon::iter::ParallelIterator;
 use tfhe::shortint::wopbs::{WopbsKey, WopbsLUTBase};
 use tfhe::shortint::{
     CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus, ShortintParameterSet,
@@ -42,10 +43,10 @@ fn params_lvl_5() -> ShortintParameterSet {
         glwe_dimension: GlweDimension(2),
         polynomial_size: PolynomialSize(1024),
         lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            6.676348397087967e-05, // todo noise
+            6.27510880527384e-05,
         )),
         glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            2.845267479601915e-15,
+            0.00000000000000022148688116005568,
         )),
         pbs_level: DecompositionLevelCount(6),
         pbs_base_log: DecompositionBaseLog(7),
@@ -56,7 +57,7 @@ fn params_lvl_5() -> ShortintParameterSet {
         pfks_level: DecompositionLevelCount(3),
         pfks_base_log: DecompositionBaseLog(12),
         pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            2.845267479601915e-15,
+            0.00000000000000022148688116005568,
         )),
         message_modulus: MessageModulus(2),
         carry_modulus: CarryModulus(1),
@@ -148,62 +149,39 @@ fn params_lvl_11() -> ShortintParameterSet {
     ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
 }
 
-// todo simplify model
-
-
-
-/// Ciphertext representing a single bit and encrypted for use in circuit bootstrapping. Encrypted under LWE key
+/// Ciphertext representing a single bit and encrypted for use in circuit bootstrapping. Encrypted under GLWE key
 #[derive(Clone)]
 pub struct BitCt {
-    ct: LweCiphertextOwned<u64>,
-    noise_level: NoiseLevel,
+    ct: shortint::Ciphertext,
     pub context: FheContext,
 }
 
 impl Debug for BitCt {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BitCt")
-            .field("ct", &self.ct)
-            .field("noise_level", &self.noise_level)
-            .finish()
+        f.debug_struct("BitCt").field("ct", &self.ct).finish()
     }
 }
 
 impl BitCt {
-    pub fn new(fhe: LweCiphertextOwned<u64>, context: FheContext) -> Self {
-        Self {
-            ct: fhe,
-            noise_level: NoiseLevel::NOMINAL,
-            context,
-        }
+    pub fn new(ct: shortint::Ciphertext, context: FheContext) -> Self {
+        Self { ct, context }
     }
 
     fn trivial(bit: Cleartext<u64>, context: FheContext) -> Self {
         let ct = lwe_encryption::allocate_and_trivially_encrypt_new_lwe_ciphertext(
             context
                 .server_key
-                .bootstrapping_key
-                .input_lwe_dimension()
+                .key_switching_key
+                .input_key_lwe_dimension()
                 .to_lwe_size(),
             encode_bit(bit),
             CiphertextModulus::new_native(),
         );
 
         Self {
-            ct,
-            noise_level: NoiseLevel::ZERO,
+            ct: wrap_in_shortint(ct, NoiseLevel::ZERO),
             context,
         }
-    }
-
-    fn set_noise_level(&mut self, noise_level: NoiseLevel) {
-        self.context
-            .server_key
-            .max_noise_level
-            .validate(noise_level)
-            .unwrap();
-
-        self.noise_level = noise_level;
     }
 }
 
@@ -218,9 +196,9 @@ pub fn decode_bit(encoding: Plaintext<u64>) -> Cleartext<u64> {
 
 impl BitXorAssign<&BitCt> for BitCt {
     fn bitxor_assign(&mut self, rhs: &Self) {
-        lwe_linear_algebra::lwe_ciphertext_add_assign(&mut self.ct, &rhs.ct);
-        #[allow(clippy::suspicious_op_assign_impl)]
-        self.set_noise_level(self.noise_level + rhs.noise_level);
+        self.context
+            .server_key
+            .unchecked_add_assign(&mut self.ct, &rhs.ct);
     }
 }
 
@@ -233,17 +211,15 @@ impl BitXor for BitCt {
     }
 }
 
-/// Ciphertext representing 1 bit encrypted for bit extraction but encrypted under the GLWE key and
-/// not the LWE key
+/// Ciphertext representing 1 bit encrypted for bit extraction but encrypted under the LWE key
 #[derive(Clone)]
-pub struct DualCiphertext {
-    pub ct: LweCiphertextOwned<u64>,
-    pub context: FheContext,
+struct DualCiphertext {
+    ct: LweCiphertextOwned<u64>,
 }
 
 impl DualCiphertext {
-    pub fn new(ct: LweCiphertextOwned<u64>, context: FheContext) -> Self {
-        Self { ct, context }
+    fn new(ct: LweCiphertextOwned<u64>) -> Self {
+        Self { ct }
     }
 }
 
@@ -262,9 +238,6 @@ impl ContextT for FheContext {
 }
 
 pub struct ClientKey {
-    #[allow(unused)]
-    glwe_secret_key: GlweSecretKeyOwned<u64>,
-    lwe_secret_key: LweSecretKeyOwned<u64>,
     shortint_client_key: shortint::ClientKey,
     context: FheContext,
 }
@@ -273,27 +246,13 @@ impl ClientKeyT for ClientKey {
     type Bit = BitCt;
 
     fn encrypt(&self, bit: Cleartext<u64>) -> BitCt {
-        let (encryption_lwe_sk, encryption_noise_distribution) = (
-            &self.lwe_secret_key,
-            self.shortint_client_key.parameters.lwe_noise_distribution(),
-        );
-
-        let ct = ShortintEngine::with_thread_local_mut(|engine| {
-            lwe_encryption::allocate_and_encrypt_new_lwe_ciphertext(
-                encryption_lwe_sk,
-                encode_bit(bit),
-                encryption_noise_distribution,
-                self.shortint_client_key.parameters.ciphertext_modulus(),
-                &mut engine.encryption_generator,
-            )
-        });
+        let ct = self.shortint_client_key.encrypt_without_padding(bit.0);
 
         BitCt::new(ct, self.context.clone())
     }
 
     fn decrypt(&self, bit: &BitCt) -> Cleartext<u64> {
-        let encoding = lwe_encryption::decrypt_lwe_ciphertext(&self.lwe_secret_key, &bit.ct);
-        decode_bit(encoding)
+        Cleartext(self.shortint_client_key.decrypt_without_padding(&bit.ct))
     }
 }
 
@@ -318,12 +277,7 @@ impl FheContext {
             wopbs_key: wops_key.into(),
         };
 
-        let (glwe_secret_key, lwe_secret_key, _parameters) =
-            shortint_client_key.clone().into_raw_parts();
-
         let client_key = ClientKey {
-            glwe_secret_key,
-            lwe_secret_key,
             shortint_client_key,
             context: context.clone(),
         };
@@ -352,55 +306,54 @@ impl FheContext {
         )
     }
 
-    /// Circuit bootstrap using the given bits as input. Returns "dual" ciphertexts should be
-    /// extracted to ciphertexts that can be calculated on via [`Self::extract_bit_from_dual_ciphertext`]
-    pub fn circuit_bootstrap(&self, bits: &[&BitCt], lut: &WopbsLUTBase) -> Vec<DualCiphertext> {
+    /// Circuit bootstrap using with given bits as input
+    pub fn circuit_bootstrap(&self, bits: &[&BitCt], lut: &WopbsLUTBase) -> Vec<BitCt> {
         let start = Instant::now();
 
-        let lwe_size = bits[0].ct.lwe_size();
+        let dual_bits: Vec<_> = bits
+            .par_iter()
+            .map(|bit| self.extract_dual_bit_from_bit(bit))
+            .collect();
 
-        let mut bits_data =
-            Vec::with_capacity(bits.iter().map(|bit_ct| bit_ct.ct.as_ref().len()).sum());
-        for bit_ct in bits {
-            bits_data.extend(bit_ct.ct.as_ref());
+        let lwe_size = dual_bits[0].ct.lwe_size();
+
+        let mut dual_bits_data = Vec::with_capacity(
+            dual_bits
+                .iter()
+                .map(|dual_bit_ct| dual_bit_ct.ct.as_ref().len())
+                .sum(),
+        );
+        for dual_bit_ct in dual_bits {
+            dual_bits_data.extend(dual_bit_ct.ct.as_ref());
         }
 
-        let bits_list_ct = LweCiphertextListOwned::create_from(
-            bits_data,
+        let dual_bits_list_ct = LweCiphertextListOwned::create_from(
+            dual_bits_data,
             LweCiphertextListCreationMetadata {
                 lwe_size,
                 ciphertext_modulus: CiphertextModulus::new_native(),
             },
         );
 
-        let dual_cts: Vec<_> = self
+        let bit_cts: Vec<_> = self
             .wopbs_key
-            .circuit_bootstrapping_vertical_packing(lut, &bits_list_ct)
+            .circuit_bootstrapping_vertical_packing(lut, &dual_bits_list_ct)
             .into_iter()
-            .map(|lwe_ct| DualCiphertext::new(lwe_ct, self.clone()))
+            .map(|lwe_ct| BitCt::new(wrap_in_shortint(lwe_ct, NoiseLevel::NOMINAL), self.clone()))
             .collect();
 
         debug!("multivalued circuit bootstrap {:?}", start.elapsed());
 
-        dual_cts
+        bit_cts
     }
 
-    /// Extract the single bit from the "dual" ciphertext. This is effectively just a keyswitch
-    pub fn extract_bit_from_dual_ciphertext(&self, ct: &DualCiphertext) -> BitCt {
+    /// Extract the "dual" single bit from the bit ciphertext. This is effectively just a keyswitch
+    fn extract_dual_bit_from_bit(&self, ct: &BitCt) -> DualCiphertext {
         let start = Instant::now();
 
-        let shortint_ct = shortint::Ciphertext::new(
-            ct.ct.clone(),
-            Degree::new(1),
-            NoiseLevel::NOMINAL,
-            MessageModulus(2),
-            CarryModulus(1),
-            PBSOrder::KeyswitchBootstrap,
-        );
-
-        let bit_cts =
-            self.wopbs_key
-                .extract_bits(DeltaLog(63), &shortint_ct, ExtractedBitsCount(1));
+        let bit_cts = self
+            .wopbs_key
+            .extract_bits(DeltaLog(63), &ct.ct, ExtractedBitsCount(1));
 
         let bit_ct = bit_cts.iter().next().expect("one bit");
 
@@ -408,15 +361,12 @@ impl FheContext {
 
         debug!("extract bit {:?}", start.elapsed());
 
-        BitCt::new(
-            LweCiphertextOwned::create_from(
-                data,
-                LweCiphertextCreationMetadata {
-                    ciphertext_modulus: CiphertextModulus::new_native(),
-                },
-            ),
-            self.clone(),
-        )
+        DualCiphertext::new(LweCiphertextOwned::create_from(
+            data,
+            LweCiphertextCreationMetadata {
+                ciphertext_modulus: CiphertextModulus::new_native(),
+            },
+        ))
     }
 }
 
@@ -455,6 +405,20 @@ fn generate_multivariate_luts(
     }
 
     lut
+}
+
+fn wrap_in_shortint(
+    lwe_ct: LweCiphertextOwned<u64>,
+    noise_level: NoiseLevel,
+) -> shortint::Ciphertext {
+    shortint::Ciphertext::new(
+        lwe_ct,
+        Degree::new(1),
+        noise_level,
+        MessageModulus(2),
+        CarryModulus(1),
+        PBSOrder::KeyswitchBootstrap,
+    )
 }
 
 #[cfg(test)]
@@ -561,7 +525,6 @@ pub mod test {
             .into_iter()
             .next()
             .expect("one bit");
-        let d = context.extract_bit_from_dual_ciphertext(&d);
 
         assert_eq!(client_key.decrypt(&d).0, parity_fn(word));
     }
@@ -599,10 +562,7 @@ pub mod test {
         let tv = context.generate_lookup_table(bits, bits, square_fn);
         let out = context.circuit_bootstrap(&bit_cts.each_ref()[16 - bits..], &tv);
 
-        let out_clear: Vec<_> = out
-            .into_iter()
-            .map(|d| client_key.decrypt(&context.extract_bit_from_dual_ciphertext(&d)))
-            .collect();
+        let out_clear: Vec<_> = out.into_iter().map(|d| client_key.decrypt(&d)).collect();
         let out_bits: [u8; 64] = array::from_fn(|i| {
             out_clear
                 .get(i - 64 + bits)

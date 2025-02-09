@@ -8,8 +8,8 @@ use tfhe_aes::aes_128::fhe::data_model::{Block, Byte, Word};
 use tfhe_aes::aes_128::{aes_lib, fhe::fhe_encryption};
 use tfhe_aes::{aes_128, logger};
 
+use tfhe_aes::aes_128::fhe::fhe_sbox_gal_mul_pbs_impls::shortint_woppbs_1bit::ShortintWoppbs1BitSboxGalMulPbsAesEncrypt;
 use tfhe_aes::aes_128::fhe::fhe_sbox_pbs_impls::shortint_1bit::Shortint1BitSboxPbsAesEncrypt;
-use tfhe_aes::aes_128::fhe::fhe_sbox_pbs_impls::shortint_woppbs_1bit::ShortintWoppbs1BitSboxPbsAesEncrypt;
 use tfhe_aes::aes_128::fhe::fhe_sbox_pbs_impls::shortint_woppbs_8bit::ShortintWoppbs8BitSboxPbsAesEncrypt;
 use tfhe_aes::aes_128::fhe::Aes128Encrypt;
 use tfhe_aes::tfhe::{
@@ -17,7 +17,6 @@ use tfhe_aes::tfhe::{
 };
 use tracing::debug;
 use tracing::metadata::LevelFilter;
-use tfhe_aes::aes_128::fhe::fhe_sbox_gal_mul_pbs_impls::shortint_woppbs_1bit::ShortintWoppbs1BitSboxGalMulPbsAesEncrypt;
 
 #[derive(Debug, Clone, ValueEnum)]
 #[clap(rename_all = "kebab-case")]
