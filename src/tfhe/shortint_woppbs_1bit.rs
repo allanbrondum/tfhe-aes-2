@@ -1,7 +1,4 @@
 //! Model with each ciphertext representing 1 bit. Build on `tfhe-rs` `shortint` module with WoP-PBS.
-//!
-//! Leveled calculations are intended to be performed on the ciphertext [`BitCt`]. In comparison to
-//! how it is
 
 use crate::tfhe::{ClientKeyT, ContextT};
 

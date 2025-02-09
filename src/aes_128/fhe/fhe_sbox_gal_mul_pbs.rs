@@ -1,7 +1,3 @@
-//! Generic implementation based on one ciphertext representing one bit. This means that "xor" can be
-//! evaluated and a simple addition of ciphertext.
-//! SBOX byte substitution composed with Galois multiplication is calculated via programmable bootstrapping.
-
 pub trait ByteT: Sized {
     /// Bootstrap to reset noise
     fn bootstrap_assign(&mut self);

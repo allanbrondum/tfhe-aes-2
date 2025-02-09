@@ -73,7 +73,7 @@ impl Aes128Encrypt for Shortint1BitSboxPbsAesEncrypt {
 
 #[cfg(test)]
 mod test {
-    use crate::aes_128::fhe::fhe_sbox_pbs_impls::shortint_1bit::Shortint1BitSboxPbsAesEncrypt;
+    use crate::aes_128::fhe::fhe_impls::shortint_1bit::Shortint1BitSboxPbsAesEncrypt;
     use crate::aes_128::test_helper;
     use crate::logger;
     use tracing::metadata::LevelFilter;

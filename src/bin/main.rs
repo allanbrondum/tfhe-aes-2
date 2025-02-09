@@ -8,9 +8,9 @@ use tfhe_aes::aes_128::fhe::data_model::{Block, Byte, Word};
 use tfhe_aes::aes_128::{aes_lib, fhe::fhe_encryption};
 use tfhe_aes::{aes_128, logger};
 
-use tfhe_aes::aes_128::fhe::fhe_sbox_gal_mul_pbs_impls::shortint_woppbs_1bit::ShortintWoppbs1BitSboxGalMulPbsAesEncrypt;
-use tfhe_aes::aes_128::fhe::fhe_sbox_pbs_impls::shortint_1bit::Shortint1BitSboxPbsAesEncrypt;
-use tfhe_aes::aes_128::fhe::fhe_sbox_pbs_impls::shortint_woppbs_8bit::ShortintWoppbs8BitSboxPbsAesEncrypt;
+use tfhe_aes::aes_128::fhe::fhe_impls::shortint_1bit::Shortint1BitSboxPbsAesEncrypt;
+use tfhe_aes::aes_128::fhe::fhe_impls::shortint_woppbs_1bit::ShortintWoppbs1BitSboxGalMulPbsAesEncrypt;
+use tfhe_aes::aes_128::fhe::fhe_impls::shortint_woppbs_8bit::ShortintWoppbs8BitSboxPbsAesEncrypt;
 use tfhe_aes::aes_128::fhe::Aes128Encrypt;
 use tfhe_aes::tfhe::{
     shortint_1bit, shortint_woppbs_1bit, shortint_woppbs_8bit, ClientKeyT, ContextT,

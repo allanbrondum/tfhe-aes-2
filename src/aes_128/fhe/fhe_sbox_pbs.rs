@@ -1,6 +1,3 @@
-//! Generic implementation based on one ciphertext representing one bit. This means that "xor" can be
-//! evaluated and a simple addition of ciphertext. SBOX byte substitution is calculated via programmable bootstrapping.
-
 use crate::aes_128::fhe::data_model;
 use crate::aes_128::fhe::data_model::{BitT, Block};
 use crate::aes_128::fhe::data_model::{Byte, State, Word};
