@@ -17,7 +17,7 @@ effectively be ignored.
 The library consist of two parts. A set of models for doing FHE computation are defined in `tfhe_aes::tfhe`. 
 They are all based on `tfhe-rs` but has some additional primitives that adds expressiveness or effectiveness.
 
-There are two AES-128 FHE implementation in `tfhe_aes::aes_128::fhe` that are generic over the FHE model used. 
+There are two AES-128 FHE implementations in `tfhe_aes::aes_128::fhe` that are generic over the FHE model used. 
 
 ## AES-128 FHE implementations
 
