@@ -1,8 +1,8 @@
 use std::time::Instant;
 
 use crate::aes_128;
-use crate::aes_128::fhe_sub_pbs::data_model::{BitT, Block, Byte, ByteT, Word};
-use crate::aes_128::{aes_lib, fhe_sub_pbs, fhe_encryption, plain, ROUNDS};
+use crate::aes_128::fhe_sbox_pbs::data_model::{BitT, Block, Byte, ByteT, Word};
+use crate::aes_128::{aes_lib, fhe_sbox_pbs, fhe_encryption, plain, ROUNDS};
 use crate::tfhe::{ClientKeyT, ContextT};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -130,7 +130,7 @@ where
 {
     // Server side (optional): AES encrypt blocks
     let start = Instant::now();
-    let key_schedule = fhe_sub_pbs::key_schedule(ctx, &key);
+    let key_schedule = fhe_sbox_pbs::key_schedule(ctx, &key);
     println!("AES key expansion took: {:?}", start.elapsed());
 
     key_schedule
@@ -150,7 +150,7 @@ where
     let start = Instant::now();
     let encrypted_blocks: Vec<_> = blocks
         .into_par_iter()
-        .map(|block| fhe_sub_pbs::encrypt_block_for_rounds(ctx, &key_schedule, block, rounds))
+        .map(|block| fhe_sbox_pbs::encrypt_block_for_rounds(ctx, &key_schedule, block, rounds))
         .collect();
     println!(
         "AES ({} rounds) of #{} outputs computed in: {:?}",

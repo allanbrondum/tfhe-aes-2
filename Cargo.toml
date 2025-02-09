@@ -7,7 +7,7 @@ edition = "2021"
 debug = true
 
 [dependencies]
-tfhe = { version = "0.11.0", features = ["boolean", "shortint", "integer", "noise-asserts", "experimental", "nightly-avx512"] }
+tfhe = { version = "0.11.2", features = ["boolean", "shortint", "integer", "noise-asserts", "experimental", "nightly-avx512"] }
 rand = "0.9.0"
 rand_chacha = "0.9.0"
 aes = "0.8.4"
@@ -21,5 +21,3 @@ anyhow = "1.0.95"
 [features]
 long_running_tests = []
 
-#[patch.crates-io]
-#tfhe = { path = "../tfhe-rs/tfhe" }

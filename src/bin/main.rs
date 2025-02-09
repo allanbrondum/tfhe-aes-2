@@ -4,8 +4,8 @@ use clap::{Parser, ValueEnum};
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
 use std::time::Instant;
-use tfhe_aes::aes_128::fhe_sub_pbs::data_model::{BitT, Block, Byte, ByteT, Word};
-use tfhe_aes::aes_128::{aes_lib, fhe_sub_pbs, fhe_encryption};
+use tfhe_aes::aes_128::fhe_sbox_pbs::data_model::{BitT, Block, Byte, ByteT, Word};
+use tfhe_aes::aes_128::{aes_lib, fhe_sbox_pbs, fhe_encryption};
 use tfhe_aes::{aes_128, logger};
 
 use tfhe_aes::tfhe::{
@@ -117,7 +117,7 @@ where
 {
     // Server side (optional): AES encrypt blocks
     let start = Instant::now();
-    let key_schedule = fhe_sub_pbs::key_schedule(ctx, &key);
+    let key_schedule = fhe_sbox_pbs::key_schedule(ctx, &key);
     println!("AES key expansion took: {:?}", start.elapsed());
     key_schedule
 }
@@ -136,7 +136,7 @@ where
     let encrypted_blocks: Vec<_> = blocks
         .into_par_iter()
         // todo limit parallelization of blocks?
-        .map(|block| fhe_sub_pbs::encrypt_block(ctx, &key_schedule, block))
+        .map(|block| fhe_sbox_pbs::encrypt_block(ctx, &key_schedule, block))
         .collect();
     println!(
         "AES of #{} outputs computed in: {:?}",

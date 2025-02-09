@@ -85,6 +85,8 @@ fn params_() -> ShortintParameterSet { // todo
     ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
 }
 
+// todo simplify model
+
 fn params() -> ShortintParameterSet {
     let wopbs_params = WopbsParameters {
         lwe_dimension: LweDimension(665),

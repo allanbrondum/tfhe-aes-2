@@ -3,7 +3,7 @@
 
 pub mod data_model;
 
-use crate::aes_128::fhe_sub_pbs::data_model::{BitT, Block, Byte, ByteT, State, Word};
+use crate::aes_128::fhe_sbox_pbs::data_model::{BitT, Block, Byte, ByteT, State, Word};
 use crate::aes_128::{RC, ROUNDS};
 use crate::util;
 use rayon::iter::IndexedParallelIterator;

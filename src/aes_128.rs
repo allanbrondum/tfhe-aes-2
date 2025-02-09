@@ -4,7 +4,7 @@
 pub mod aes_lib;
 /// Data model and logic for AES-128 encryption executed in an FHE context. Based on XOR's of individual bits
 /// and using programmable bootstrap for SubBytes. Generic over the TFHE model used.
-pub mod fhe_sub_pbs;
+pub mod fhe_sbox_pbs;
 /// Utilities to encrypt clear data (e.g. keys and blocks) into FHE data model
 pub mod fhe_encryption;
 /// FHE AES-128 implementations using different TFHE models
