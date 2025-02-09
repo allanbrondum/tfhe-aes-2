@@ -6,10 +6,10 @@ The binary may be run with the command
 cargo run --release -- --key 76b8e0ada0f13d90405d6ae55386bd28 --iv bdd219b8a08ded1a --number-of-outputs 10
 ```
 
-The binary by default uses the implementation `tfhe_aes::aes_128::fhe::fhe_sbox_gal_mul_pbs_impls::shortint_woppbs_1bit`
-and that should be considered the submitted solution. That implementation uses the FHE model `shortint_woppbs_1bit` 
+The binary by default uses the implementation `ShortintWoppbs1BitSboxGalMulPbsAesEncrypt`
+and that should be considered the submitted solution. This implementation uses the FHE model `shortint_woppbs_1bit` 
 and the AES-128 FHE implementation `fhe_sbox_gal_mul_pbs` which are the essential parts of the solution.
-The other models in `tfhe_aes::tfhe` and the AES-128 FHE implementation `tfhe_aes::aes_128::fhe::fhe_sbox_pbs` can
+The other models in `tfhe_aes::tfhe` and the AES-128 FHE implementation `fhe_sbox_pbs` can
 effectively be ignored.
 
 # Overview of the library
