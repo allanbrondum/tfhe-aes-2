@@ -11,7 +11,8 @@ use tfhe::shortint;
 use tfhe::shortint::ciphertext::{Degree, NoiseLevel};
 
 use crate::tfhe::engine::ShortintEngine;
-use tfhe::shortint::wopbs::{ShortintWopbsLUT, WopbsKey};
+use crate::util;
+use tfhe::shortint::wopbs::{ShortintWopbsLUT, WopbsKey, WopbsLUTBase};
 use tfhe::shortint::{
     CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus, ShortintParameterSet,
     WopbsParameters,
@@ -244,7 +245,7 @@ impl FheContext {
         &self,
         bits: usize,
         f: impl Fn(u8) -> Cleartext<u64>,
-    ) -> ShortintWopbsLUT {
+    ) -> WopbsLUTBase {
         generate_multivariate_lut(
             bits,
             self.wopbs_key
@@ -253,13 +254,29 @@ impl FheContext {
                 .polynomial_size(),
             f,
         )
-        .into()
     }
 
-    /// Functional bootstrap of 8 bit `shortint` from individual bits
-    pub fn bootstrap_from_bits(&self, bits: &[&BitCt], lut: &ShortintWopbsLUT) -> DualCiphertext {
+    pub fn generate_multivariate_multivalued_lookup_table(
+        &self,
+        input_bits: usize,
+        output_bits: usize,
+        f: impl Fn(u8) -> u8,
+    ) -> WopbsLUTBase {
+        generate_multivariate_luts(
+            input_bits,
+            output_bits,
+            self.wopbs_key
+                .wopbs_server_key
+                .bootstrapping_key
+                .polynomial_size(),
+            f,
+        )
+    }
+
+    /// Circuit bootstrap of 1 bit with multiple input bits
+    pub fn circuit_bootstrap(&self, bits: &[&BitCt], lut: &WopbsLUTBase) -> DualCiphertext {
         let start = Instant::now();
-        assert_eq!(lut.as_ref().output_ciphertext_count(), CiphertextCount(1));
+        assert_eq!(lut.output_ciphertext_count(), CiphertextCount(1));
 
         let lwe_size = bits[0].ct.lwe_size();
 
@@ -279,16 +296,53 @@ impl FheContext {
 
         let lwe_ct = self
             .wopbs_key
-            .circuit_bootstrapping_vertical_packing(lut.as_ref(), &bits_list_ct)
+            .circuit_bootstrapping_vertical_packing(lut, &bits_list_ct)
             .into_iter()
             .next()
             .expect("one element");
 
-        debug!("circuit bootstrap {:?}", start.elapsed());
+        debug!("(single value) circuit bootstrap {:?}", start.elapsed());
 
         DualCiphertext::new(lwe_ct, self.clone())
     }
 
+    /// Circuit bootstrap of multiple bits with multiple input bits
+    pub fn circuit_bootstrap_multivalued(
+        &self,
+        bits: &[&BitCt],
+        lut: &WopbsLUTBase,
+    ) -> Vec<DualCiphertext> {
+        let start = Instant::now();
+
+        let lwe_size = bits[0].ct.lwe_size();
+
+        let mut bits_data =
+            Vec::with_capacity(bits.iter().map(|bit_ct| bit_ct.ct.as_ref().len()).sum());
+        for bit_ct in bits {
+            bits_data.extend(bit_ct.ct.as_ref());
+        }
+
+        let bits_list_ct = LweCiphertextListOwned::create_from(
+            bits_data,
+            LweCiphertextListCreationMetadata {
+                lwe_size,
+                ciphertext_modulus: CiphertextModulus::new_native(),
+            },
+        );
+
+        let dual_cts: Vec<_> = self
+            .wopbs_key
+            .circuit_bootstrapping_vertical_packing(lut, &bits_list_ct)
+            .into_iter()
+            .map(|lwe_ct| DualCiphertext::new(lwe_ct, self.clone()))
+            .collect();
+
+        debug!("multivalued circuit bootstrap {:?}", start.elapsed());
+
+        dual_cts
+    }
+
+    /// Extract the single bit from the "dual" ciphertext. This is effectively just a keyswitch
     pub fn extract_bit_from_bit(&self, ct: &DualCiphertext) -> BitCt {
         let start = Instant::now();
 
@@ -327,16 +381,50 @@ fn generate_multivariate_lut(
     bits: usize,
     polynomial_size: PolynomialSize,
     f: impl Fn(u8) -> Cleartext<u64>,
-) -> Vec<u64> {
+) -> WopbsLUTBase {
     assert!(0 < bits && bits <= 8);
 
-    let basis = 1 << bits;
-    let mut vec_lut = vec![0; polynomial_size.0];
-    for (i, value) in vec_lut.iter_mut().enumerate().take(basis as usize) {
-        assert!(i < 256);
-        *value = encode_bit(f(i as u8)).0;
+    let mut lut = WopbsLUTBase::new(PlaintextCount(polynomial_size.0), CiphertextCount(1));
+
+    let mut lut_slice = lut.get_small_lut_mut(0);
+    for (val, value) in lut_slice.iter_mut().enumerate().take(1 << bits) {
+        assert!(val < 256);
+        *value = encode_bit(f(val as u8)).0;
     }
-    vec_lut
+
+    lut
+}
+
+fn generate_multivariate_luts(
+    input_bits: usize,
+    output_bits: usize,
+    polynomial_size: PolynomialSize,
+    f: impl Fn(u8) -> u8,
+) -> WopbsLUTBase {
+    assert!(0 < input_bits && input_bits <= 8);
+    assert!(0 < output_bits && output_bits <= 8);
+
+    let mut lut = WopbsLUTBase::new(
+        PlaintextCount(polynomial_size.0),
+        CiphertextCount(output_bits),
+    );
+
+    for output_bit in 0..output_bits {
+        for (val, value) in lut
+            .get_small_lut_mut(output_bit)
+            .iter_mut()
+            .enumerate()
+            .take(1 << input_bits)
+        {
+            assert!(val < 256);
+            *value = encode_bit(Cleartext(
+                util::byte_to_bits(f(val as u8))[output_bit + 8 - output_bits] as u64,
+            ))
+            .0;
+        }
+    }
+
+    lut
 }
 
 /// Ciphertext representing 1 bit encrypted for bit extraction but encrypted under the GLWE key and
@@ -356,6 +444,7 @@ impl DualCiphertext {
 #[cfg(test)]
 pub mod test {
     use super::*;
+    use std::{array, iter};
 
     use crate::{logger, util};
     use std::sync::{Arc, LazyLock};
@@ -414,30 +503,30 @@ pub mod test {
     }
 
     #[test]
-    fn test_bivariate_parity_fn_3() {
+    fn test_multivariate_parity_fn_3() {
         logger::test_init(LevelFilter::DEBUG);
 
-        test_bivariate_parity_fn_impl(3, 0b001);
-        test_bivariate_parity_fn_impl(3, 0b000);
-        test_bivariate_parity_fn_impl(3, 0b100);
-        test_bivariate_parity_fn_impl(3, 0b101);
+        test_multivariate_parity_fn_impl(3, 0b001);
+        test_multivariate_parity_fn_impl(3, 0b000);
+        test_multivariate_parity_fn_impl(3, 0b100);
+        test_multivariate_parity_fn_impl(3, 0b101);
     }
 
     #[test]
-    fn test_bivariate_parity_fn_8() {
+    fn test_multivariate_parity_fn_8() {
         logger::test_init(LevelFilter::DEBUG);
 
-        test_bivariate_parity_fn_impl(8, 0b11001001);
-        test_bivariate_parity_fn_impl(8, 0b01001001);
-        test_bivariate_parity_fn_impl(8, 0b00101010);
-        test_bivariate_parity_fn_impl(8, 0b11011001);
+        test_multivariate_parity_fn_impl(8, 0b11001001);
+        test_multivariate_parity_fn_impl(8, 0b01001001);
+        test_multivariate_parity_fn_impl(8, 0b00101010);
+        test_multivariate_parity_fn_impl(8, 0b11011001);
     }
 
-    fn test_bivariate_parity_fn_impl(bits: usize, byte: u8) {
+    fn test_multivariate_parity_fn_impl(bits: usize, byte: u8) {
         let (client_key, context) = KEYS.clone();
 
-        let parity_fn = |index: u8| -> Cleartext<u64> {
-            Cleartext((util::byte_to_bits(index).iter().sum::<u8>() % 2) as u64)
+        let parity_fn = |val: u8| -> Cleartext<u64> {
+            Cleartext((util::byte_to_bits(val).iter().sum::<u8>() % 2) as u64)
         };
 
         // println!("parity {}", parity_fn(byte).0);
@@ -448,9 +537,59 @@ pub mod test {
         // println!("bits {:?}", bits_cl);
 
         let tv = context.generate_multivariate_lookup_table(bits, parity_fn);
-        let d = context.bootstrap_from_bits(&bit_cts.each_ref()[8 - bits..], &tv);
+        let d = context.circuit_bootstrap(&bit_cts.each_ref()[8 - bits..], &tv);
         let d = context.extract_bit_from_bit(&d);
 
         assert_eq!(client_key.decrypt(&d), parity_fn(byte));
+    }
+
+    #[test]
+    fn test_multivariate_multivalues_square_fn_3() {
+        logger::test_init(LevelFilter::DEBUG);
+
+        test_multivariate_multivalued_square_fn_impl(3, 0b101);
+        test_multivariate_multivalued_square_fn_impl(3, 0b000);
+        test_multivariate_multivalued_square_fn_impl(3, 0b100);
+        test_multivariate_multivalued_square_fn_impl(3, 0b101);
+    }
+
+    #[test]
+    fn test_multivariate_multivalues_square_fn_8() {
+        logger::test_init(LevelFilter::DEBUG);
+
+        test_multivariate_multivalued_square_fn_impl(8, 0b11001001);
+        test_multivariate_multivalued_square_fn_impl(8, 0b01001001);
+        test_multivariate_multivalued_square_fn_impl(8, 0b00101010);
+        test_multivariate_multivalued_square_fn_impl(8, 0b11011001);
+    }
+
+    fn test_multivariate_multivalued_square_fn_impl(bits: usize, byte: u8) {
+        let (client_key, context) = KEYS.clone();
+
+        let square_fn = |val: u8| -> u8 { val * val % (1 << bits) };
+
+        // println!("parity {}", parity_fn(byte).0);
+
+        let bit_cts = util::byte_to_bits(byte).map(|bit| client_key.encrypt(Cleartext(bit as u64)));
+
+        // let bits_cl:Vec<_> = bit_cts.each_ref()[8 - bits..].iter().map(|ct| client_key.decrypt(&ct)).collect();
+        // println!("bits {:?}", bits_cl);
+
+        let tv = context.generate_multivariate_multivalued_lookup_table(bits, bits, square_fn);
+        let out = context.circuit_bootstrap_multivalued(&bit_cts.each_ref()[8 - bits..], &tv);
+
+        let out_clear: Vec<_> = out
+            .into_iter()
+            .map(|d| client_key.decrypt(&context.extract_bit_from_bit(&d)))
+            .collect();
+        let out_bits: [u8; 8] = array::from_fn(|i| {
+            out_clear
+                .get(i - 8 + bits)
+                .map(|bit| bit.0 as u8)
+                .unwrap_or_default()
+        });
+        let out_byte = util::bits_to_byte(out_bits);
+
+        assert_eq!(out_byte, square_fn(byte));
     }
 }

@@ -660,16 +660,16 @@ pub mod test {
     }
 
     #[test]
-    fn test_bivariate_fn_3() {
+    fn test_multivariate_fn_3() {
         logger::test_init(LevelFilter::DEBUG);
 
-        test_bivariate_fn_3_impl(0, 0, 0);
-        test_bivariate_fn_3_impl(0, 1, 1);
-        test_bivariate_fn_3_impl(1, 0, 1);
-        test_bivariate_fn_3_impl(1, 1, 0);
+        test_multivariate_fn_3_impl(0, 0, 0);
+        test_multivariate_fn_3_impl(0, 1, 1);
+        test_multivariate_fn_3_impl(1, 0, 1);
+        test_multivariate_fn_3_impl(1, 1, 0);
     }
 
-    fn test_bivariate_fn_3_impl(m0_clear: u64, m1_clear: u64, m2_clear: u64) {
+    fn test_multivariate_fn_3_impl(m0_clear: u64, m1_clear: u64, m2_clear: u64) {
         let (client_key, context) = KEYS.clone();
 
         let f = |index: u8| -> Cleartext<u64> {
@@ -691,26 +691,26 @@ pub mod test {
     }
 
     #[test]
-    fn test_bivariate_parity_fn_3() {
+    fn test_multivariate_parity_fn_3() {
         logger::test_init(LevelFilter::DEBUG);
 
-        test_bivariate_parity_fn_impl(3, 0b001);
-        test_bivariate_parity_fn_impl(3, 0b000);
-        test_bivariate_parity_fn_impl(3, 0b100);
-        test_bivariate_parity_fn_impl(3, 0b101);
+        test_multivariate_parity_fn_impl(3, 0b001);
+        test_multivariate_parity_fn_impl(3, 0b000);
+        test_multivariate_parity_fn_impl(3, 0b100);
+        test_multivariate_parity_fn_impl(3, 0b101);
     }
 
     #[test]
-    fn test_bivariate_parity_fn_8() {
+    fn test_multivariate_parity_fn_8() {
         logger::test_init(LevelFilter::DEBUG);
 
-        test_bivariate_parity_fn_impl(8, 0b11001001);
-        test_bivariate_parity_fn_impl(8, 0b01001001);
-        test_bivariate_parity_fn_impl(8, 0b00101010);
-        test_bivariate_parity_fn_impl(8, 0b11011001);
+        test_multivariate_parity_fn_impl(8, 0b11001001);
+        test_multivariate_parity_fn_impl(8, 0b01001001);
+        test_multivariate_parity_fn_impl(8, 0b00101010);
+        test_multivariate_parity_fn_impl(8, 0b11011001);
     }
 
-    fn test_bivariate_parity_fn_impl(bits: usize, byte: u8) {
+    fn test_multivariate_parity_fn_impl(bits: usize, byte: u8) {
         let (client_key, context) = KEYS.clone();
 
         let parity_fn = |index: u8| -> Cleartext<u64> {
