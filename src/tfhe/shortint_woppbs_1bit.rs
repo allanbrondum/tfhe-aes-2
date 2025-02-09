@@ -257,11 +257,7 @@ impl FheContext {
     }
 
     /// Functional bootstrap of 8 bit `shortint` from individual bits
-    pub fn bootstrap_from_bits(
-        &self,
-        bits: &[&BitCt],
-        lut: &ShortintWopbsLUT,
-    ) -> FullWidthCiphertext {
+    pub fn bootstrap_from_bits(&self, bits: &[&BitCt], lut: &ShortintWopbsLUT) -> DualCiphertext {
         let start = Instant::now();
         assert_eq!(lut.as_ref().output_ciphertext_count(), CiphertextCount(1));
 
@@ -290,10 +286,10 @@ impl FheContext {
 
         debug!("circuit bootstrap {:?}", start.elapsed());
 
-        FullWidthCiphertext::new(lwe_ct, self.clone())
+        DualCiphertext::new(lwe_ct, self.clone())
     }
 
-    pub fn extract_bit_from_bit(&self, ct: &FullWidthCiphertext) -> BitCt {
+    pub fn extract_bit_from_bit(&self, ct: &DualCiphertext) -> BitCt {
         let start = Instant::now();
 
         let shortint_ct = shortint::Ciphertext::new(
@@ -343,14 +339,15 @@ fn generate_multivariate_lut(
     vec_lut
 }
 
-/// Ciphertext representing 1 bit encrypted for bit extraction
+/// Ciphertext representing 1 bit encrypted for bit extraction but encrypted under the GLWE key and
+/// not the LWE key
 #[derive(Clone)]
-pub struct FullWidthCiphertext {
+pub struct DualCiphertext {
     pub ct: LweCiphertextOwned<u64>,
     pub context: FheContext,
 }
 
-impl FullWidthCiphertext {
+impl DualCiphertext {
     pub fn new(ct: LweCiphertextOwned<u64>, context: FheContext) -> Self {
         Self { ct, context }
     }

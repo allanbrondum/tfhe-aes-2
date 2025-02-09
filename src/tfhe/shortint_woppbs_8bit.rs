@@ -167,7 +167,7 @@ impl BitXor for BitCt {
     }
 }
 
-/// Ciphertext representing 8 bits encrypted for bit extraction
+/// "Dual" ciphertext representing 8 bits encrypted for bit extraction. Encrypted under GLWE key
 #[derive(Clone)]
 pub struct FullWidthCiphertext {
     pub ct: LweCiphertextOwned<u64>,
@@ -267,18 +267,11 @@ impl FheContext {
     pub fn extract_bits_from_ciphertext(&self, ct: &FullWidthCiphertext) -> Byte<BitCt> {
         let start = Instant::now();
 
-        let shortint_ct = shortint::Ciphertext::new(
-            ct.ct.clone(),
-            Degree::new(255),
-            NoiseLevel::NOMINAL,
-            MessageModulus(256),
-            CarryModulus(1),
-            PBSOrder::KeyswitchBootstrap,
+        let bit_cts = self.wopbs_key.extract_bits(
+            DeltaLog(64 - 8),
+            &wrap_in_shortint(ct.clone()),
+            ExtractedBitsCount(8),
         );
-
-        let bit_cts =
-            self.wopbs_key
-                .extract_bits(DeltaLog(64 - 8), &shortint_ct, ExtractedBitsCount(8));
 
         let bits = util::collect_array(bit_cts.iter().map(|bit_ct| {
             let start = Instant::now();
@@ -341,10 +334,22 @@ impl FheContext {
     }
 }
 
+fn wrap_in_shortint(ct: FullWidthCiphertext) -> shortint::Ciphertext {
+    shortint::Ciphertext::new(
+        ct.ct,
+        Degree::new(255),
+        NoiseLevel::NOMINAL,
+        MessageModulus(256),
+        CarryModulus(1),
+        PBSOrder::KeyswitchBootstrap,
+    )
+}
+
 #[cfg(test)]
 pub mod test {
     use super::*;
 
+    use crate::aes_128::fhe_encryption::{decrypt_byte, encrypt_byte};
     use std::sync::{Arc, LazyLock};
 
     pub static KEYS: LazyLock<(Arc<ClientKey>, FheContext)> = LazyLock::new(keys_impl);
@@ -399,75 +404,75 @@ pub mod test {
         );
     }
 
-    // #[test]
-    // fn test_bootstrap_from_bits_trivial_lut() {
-    //     let (client_key, context) = KEYS.clone();
-    //
-    //     let byte = 0b10110101;
-    //     let byte_fhe = encrypt_byte(client_key.as_ref(), byte);
-    //
-    //     let lut = context.generate_lookup_table(|val| val);
-    //     let int_byte_fhe = context.bootstrap_from_bits(&byte_fhe, &lut);
-    //
-    //     let decrypted = client_key
-    //         .shortint_client_key
-    //         .decrypt_without_padding(&int_byte_fhe.ct);
-    //     assert_eq!(decrypted, 0b10110101);
-    // }
+    #[test]
+    fn test_bootstrap_from_bits_trivial_lut() {
+        let (client_key, context) = KEYS.clone();
 
-    // #[test]
-    // fn test_bootstrap_from_bits_trivial_lut2() {
-    //     let (client_key, context) = KEYS.clone();
-    //
-    //     let byte = 0b10110101;
-    //     let byte_fhe = encrypt_byte(client_key.as_ref(), byte);
-    //
-    //     let byte2 = 0b01100110;
-    //     let byte_fhe2 = encrypt_byte(client_key.as_ref(), byte2);
-    //
-    //     let byte_fhe = byte_fhe ^ byte_fhe2.clone();
-    //
-    //     let lut = context.generate_lookup_table(|val| val);
-    //     let int_byte_fhe = context.bootstrap_from_bits(&byte_fhe, &lut);
-    //
-    //     let decrypted_int_byte = client_key
-    //         .shortint_client_key
-    //         .decrypt_without_padding(&int_byte_fhe.ct) as u8;
-    //     let decrypted_bits_byte = decrypt_byte(client_key.as_ref(), &byte_fhe);
-    //     assert_eq!(decrypted_int_byte, decrypted_bits_byte);
-    // }
-    //
-    // #[test]
-    // fn test_bootstrap_from_bits_lut() {
-    //     let (client_key, context) = KEYS.clone();
-    //
-    //     let byte = 0b10110101;
-    //     let byte_fhe = encrypt_byte(client_key.as_ref(), byte);
-    //
-    //     let lut = context.generate_lookup_table(|val| val + 3);
-    //     let int_byte_fhe = context.bootstrap_from_bits(&byte_fhe, &lut);
-    //
-    //     let decrypted = client_key
-    //         .shortint_client_key
-    //         .decrypt_without_padding(&int_byte_fhe.ct);
-    //     assert_eq!(decrypted, 0b10110101 + 3);
-    // }
-    //
-    // #[test]
-    // fn test_extract_bits_from_int_byte() {
-    //     let (client_key, context) = KEYS.clone();
-    //
-    //     let int_byte_fhe = FullWidthCiphertext::new(
-    //         client_key
-    //             .shortint_client_key
-    //             .encrypt_without_padding(0b10110101),
-    //         context.clone(),
-    //     );
-    //     let byte_fhe = context.extract_bits_from_ciphertext(&int_byte_fhe);
-    //
-    //     let byte = decrypt_byte(client_key.as_ref(), &byte_fhe);
-    //     assert_eq!(byte, 0b10110101);
-    // }
+        let byte = 0b10110101;
+        let bit_cts = encrypt_byte(client_key.as_ref(), byte);
 
-    // todo test
+        let lut = context.generate_lookup_table(|val| val);
+        let int_ct = context.bootstrap_from_bits(&bit_cts, &lut);
+
+        let decrypted = client_key
+            .shortint_client_key
+            .decrypt_without_padding(&wrap_in_shortint(int_ct));
+        assert_eq!(decrypted, 0b10110101);
+    }
+
+    #[test]
+    fn test_bootstrap_from_bits_trivial_lut2() {
+        let (client_key, context) = KEYS.clone();
+
+        let byte = 0b10110101;
+        let byte_cts = encrypt_byte(client_key.as_ref(), byte);
+
+        let byte2 = 0b01100110;
+        let byte2_cts = encrypt_byte(client_key.as_ref(), byte2);
+
+        let byte_cts = byte_cts ^ byte2_cts.clone();
+
+        let lut = context.generate_lookup_table(|val| val);
+        let int_ct = context.bootstrap_from_bits(&byte_cts, &lut);
+
+        let decrypted_int_byte = client_key
+            .shortint_client_key
+            .decrypt_without_padding(&wrap_in_shortint(int_ct))
+            as u8;
+        let decrypted_bits_byte = decrypt_byte(client_key.as_ref(), &byte_cts);
+        assert_eq!(decrypted_int_byte, decrypted_bits_byte);
+    }
+
+    #[test]
+    fn test_bootstrap_from_bits_lut() {
+        let (client_key, context) = KEYS.clone();
+
+        let byte = 0b10110101;
+        let byte_ct = encrypt_byte(client_key.as_ref(), byte);
+
+        let lut = context.generate_lookup_table(|val| val + 3);
+        let int_ct = context.bootstrap_from_bits(&byte_ct, &lut);
+
+        let decrypted = client_key
+            .shortint_client_key
+            .decrypt_without_padding(&wrap_in_shortint(int_ct));
+        assert_eq!(decrypted, 0b10110101 + 3);
+    }
+
+    #[test]
+    fn test_extract_bits_from_int_byte() {
+        let (client_key, context) = KEYS.clone();
+
+        let int_ct = FullWidthCiphertext::new(
+            client_key
+                .shortint_client_key
+                .encrypt_without_padding(0b10110101)
+                .ct,
+            context.clone(),
+        );
+        let byte_ct = context.extract_bits_from_ciphertext(&int_ct);
+
+        let byte = decrypt_byte(client_key.as_ref(), &byte_ct);
+        assert_eq!(byte, 0b10110101);
+    }
 }

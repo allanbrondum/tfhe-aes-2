@@ -9,6 +9,17 @@ use rand_chacha::ChaCha20Rng;
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
 
+pub fn test_full<CK, Ctx>(client_key: &CK, ctx: &Ctx)
+where
+    CK::Bit: BitT,
+    Byte<CK::Bit>: ByteT,
+    CK: ClientKeyT,
+    Ctx: ContextT<Bit = CK::Bit>,
+{
+    test_key_expansion_and_block_encryption_vs_aes(client_key, ctx);
+    test_key_expansion_and_block_encryption_fips_197(client_key, ctx);
+}
+
 /// Full test against `aes` Rust library
 pub fn test_key_expansion_and_block_encryption_vs_aes<CK, Ctx>(client_key: &CK, ctx: &Ctx)
 where
@@ -38,6 +49,49 @@ where
         encrypted_clear,
         aes_lib::encrypt_blocks(key_clear, blocks_clear)
     );
+}
+
+/// Full test against test vector in FIPS 197 appendix C.1
+pub fn test_key_expansion_and_block_encryption_fips_197<CK, Ctx>(client_key: &CK, ctx: &Ctx)
+where
+    CK::Bit: BitT,
+    Byte<CK::Bit>: ByteT,
+    CK: ClientKeyT,
+    Ctx: ContextT<Bit = CK::Bit>,
+{
+    let mut key_clear: aes_128::Key = hex::decode("000102030405060708090a0b0c0d0e0f")
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let mut block1_clear: aes_128::Block = hex::decode("00112233445566778899aabbccddeeff")
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let blocks_clear = &[block1_clear];
+
+    let key = fhe_encryption::encrypt_byte_array(client_key, &key_clear);
+    let blocks = fhe_encryption::encrypt_blocks(client_key, blocks_clear);
+
+    let key_schedule = expand_key(ctx, key);
+    let encrypted = encrypt_blocks(ctx, key_schedule, blocks, ROUNDS);
+    let encrypted_clear = fhe_encryption::decrypt_blocks(client_key, &encrypted);
+
+    let expected_encrypted_clear: aes_128::Block = hex::decode("69c4e0d86a7b0430d8cdb78070b4c55a")
+        .unwrap()
+        .try_into()
+        .unwrap();
+
+    assert_eq!(encrypted_clear, vec![expected_encrypted_clear],);
+}
+
+pub fn test_light<CK, Ctx>(client_key: &CK, ctx: &Ctx)
+where
+    CK::Bit: BitT,
+    Byte<CK::Bit>: ByteT,
+    CK: ClientKeyT,
+    Ctx: ContextT<Bit = CK::Bit>,
+{
+    test_block_encryption_vs_plain(client_key, ctx, 2);
 }
 
 /// Short(er) running test that only tests a limited number of AES rounds and does not test key expansion

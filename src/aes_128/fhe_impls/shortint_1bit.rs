@@ -56,22 +56,22 @@ mod test {
 
     #[ignore]
     #[test]
-    fn test_two_rounds() {
+    fn test_light() {
         logger::test_init(LevelFilter::INFO);
 
         let (client_key, ctx) = crate::tfhe::shortint_1bit::test::KEYS.clone();
 
-        test_helper::test_block_encryption_vs_plain(client_key.as_ref(), &ctx, 2);
+        test_helper::test_light(client_key.as_ref(), &ctx);
     }
 
     #[ignore]
     #[cfg(feature = "long_running_tests")]
     #[test]
-    fn test_vs_aes() {
+    fn test_full() {
         logger::test_init(LevelFilter::INFO);
 
         let (client_key, ctx) = crate::tfhe::shortint_1bit::test::KEYS.clone();
 
-        test_helper::test_key_expansion_and_block_encryption_vs_aes(client_key.as_ref(), &ctx);
+        test_helper::test_full(client_key.as_ref(), &ctx);
     }
 }
