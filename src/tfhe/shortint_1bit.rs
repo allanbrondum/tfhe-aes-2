@@ -102,6 +102,12 @@ impl BitCt {
 
 impl BitXorAssign<&BitCt> for BitCt {
     fn bitxor_assign(&mut self, rhs: &Self) {
+        // Evaluate XOR by adding. Notice that it is valid to let
+        // carry overflow into padding bit, since any functional bootstrap we run
+        // on the result will effectively be a negacyclic function:
+        // -01 == 11 in the cleartext space that includes the padding bit,
+        // and when projected down to the least significant bit, 01 and 11 are
+        // identical. This works only because we have ciphertexts map to only 1 bit.
         self.context
             .server_key
             .unchecked_add_assign(&mut self.ct, &rhs.ct);
