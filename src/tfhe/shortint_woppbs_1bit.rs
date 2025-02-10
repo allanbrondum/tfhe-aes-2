@@ -74,7 +74,7 @@ fn params_lvl_1() -> ShortintParameterSet {
         ks_level: wopbs_params.ks_level,
         message_modulus: wopbs_params.message_modulus,
         carry_modulus: wopbs_params.carry_modulus,
-        max_noise_level: MaxNoiseLevel::new(5),
+        max_noise_level: MaxNoiseLevel::new(1),
         log2_p_fail: -64.074,
         ciphertext_modulus: wopbs_params.ciphertext_modulus,
         encryption_key_choice: wopbs_params.encryption_key_choice,
