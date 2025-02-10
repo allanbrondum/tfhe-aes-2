@@ -149,6 +149,69 @@ fn params_lvl_5() -> ShortintParameterSet {
 /// Parameters created from
 ///
 /// ```text
+/// ./optimizer  --min-precision 8 --max-precision 8 --p-error 5.42101086e-20 --ciphertext-modulus-log 64 --wop-pbs
+/// security level: 128
+/// target p_error: 5.4e-20
+/// per precision and log norm2:
+///
+///   - 8: # bits
+///     -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b, cb_l,cb_b, pp_l,pp_b,  cost, p_error
+/// ...
+///     - 5 :   2, 10,  785,    5,  8,     8,  2,     3,  7,     3, 12,   8465, 5.4e-20
+/// ...
+/// ```
+fn params_lvl_5_precision_8() -> ShortintParameterSet {
+    let wopbs_params = WopbsParameters {
+        lwe_dimension: LweDimension(785),
+        glwe_dimension: GlweDimension(2),
+        polynomial_size: PolynomialSize(1024),
+        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            1.5140301927925663e-5,
+        )),
+        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            0.00000000000000022148688116005568,
+        )),
+        pbs_level: DecompositionLevelCount(5),
+        pbs_base_log: DecompositionBaseLog(8),
+        ks_level: DecompositionLevelCount(8),
+        ks_base_log: DecompositionBaseLog(2),
+        cbs_level: DecompositionLevelCount(3),
+        cbs_base_log: DecompositionBaseLog(7),
+        pfks_level: DecompositionLevelCount(3),
+        pfks_base_log: DecompositionBaseLog(12),
+        pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            0.00000000000000022148688116005568,
+        )),
+        message_modulus: MessageModulus(2),
+        carry_modulus: CarryModulus(1),
+        ciphertext_modulus: CiphertextModulus::new_native(),
+        encryption_key_choice: EncryptionKeyChoice::Big,
+    };
+
+    let pbs_params = ClassicPBSParameters {
+        lwe_dimension: wopbs_params.lwe_dimension,
+        glwe_dimension: wopbs_params.glwe_dimension,
+        polynomial_size: wopbs_params.polynomial_size,
+        lwe_noise_distribution: wopbs_params.lwe_noise_distribution,
+        glwe_noise_distribution: wopbs_params.glwe_noise_distribution,
+        pbs_base_log: wopbs_params.pbs_base_log,
+        pbs_level: wopbs_params.pbs_level,
+        ks_base_log: wopbs_params.ks_base_log,
+        ks_level: wopbs_params.ks_level,
+        message_modulus: wopbs_params.message_modulus,
+        carry_modulus: wopbs_params.carry_modulus,
+        max_noise_level: MaxNoiseLevel::new(5),
+        log2_p_fail: -64.074,
+        ciphertext_modulus: wopbs_params.ciphertext_modulus,
+        encryption_key_choice: wopbs_params.encryption_key_choice,
+    };
+
+    ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
+}
+
+/// Parameters created from
+///
+/// ```text
 /// ./optimizer  --min-precision 1 --max-precision 1 --p-error 5.42101086e-20 --ciphertext-modulus-log 64 --wop-pbs
 /// security level: 128
 /// target p_error: 5.4e-20
@@ -325,6 +388,13 @@ impl FheContext {
     /// Model allowing 5 (max noise level) leveled operations
     pub fn generate_keys_lvl_5() -> (ClientKey, Self) {
         Self::generate_keys_with_params(params_lvl_5())
+    }
+
+    /// Model allowing 5 (max noise level) leveled operations. Has
+    /// 8 bits of cleartext precision, hence can handle 8-bit input to multivariate
+    /// circuit bootstrapping.
+    pub fn generate_keys_lvl_5_precision_8() -> (ClientKey, Self) {
+        Self::generate_keys_with_params(params_lvl_5_precision_8())
     }
 
     /// Model allowing 11 (max noise level) leveled operations
