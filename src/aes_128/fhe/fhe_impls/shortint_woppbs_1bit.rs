@@ -150,9 +150,7 @@ mod test {
 
     #[test]
     fn test_light() {
-        logger::test_init(LevelFilter::INFO);
-
-        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_LVL_11.clone();
+        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_LVL_90.clone();
 
         test_helper::test_light::<ShortintWoppbs1BitSboxPbsAesEncrypt, _>(
             client_key.as_ref(),
@@ -165,16 +163,14 @@ mod test {
     fn test_full() {
         logger::test_init(LevelFilter::INFO);
 
-        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_LVL_11.clone();
+        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_LVL_90.clone();
 
         test_helper::test_full::<ShortintWoppbs1BitSboxPbsAesEncrypt, _>(client_key.as_ref(), &ctx);
     }
 
     #[test]
     fn test_light_gal_mul() {
-        logger::test_init(LevelFilter::INFO);
-
-        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_LVL_11.clone();
+        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_LVL_45.clone();
 
         test_helper::test_light::<ShortintWoppbs1BitSboxGalMulPbsAesEncrypt, _>(
             client_key.as_ref(),
@@ -187,7 +183,7 @@ mod test {
     fn test_full_gal_nul() {
         logger::test_init(LevelFilter::INFO);
 
-        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_LVL_11.clone();
+        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_LVL_45.clone();
 
         test_helper::test_full::<ShortintWoppbs1BitSboxGalMulPbsAesEncrypt, _>(
             client_key.as_ref(),

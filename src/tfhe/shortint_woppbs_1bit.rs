@@ -335,6 +335,70 @@ fn params_lvl_45() -> ShortintParameterSet {
     ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
 }
 
+/// Parameters created from
+///
+/// ```text
+/// ./optimizer  --min-precision 1 --max-precision 1 --p-error 5.42101086e-20 --ciphertext-modulus-log 64 --wop-pbs
+/// security level: 128
+/// target p_error: 5.4e-20
+/// per precision and log norm2:
+///
+///   - 1: # bits
+///     -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b, cb_l,cb_b, pp_l,pp_b,  cost, p_error
+/// ...
+/// - 13:   4,  9,  688,    7,  6,     7,  2,     3,  8,     3, 12,    959, 5.0e-20
+/// ...
+/// ```
+#[cfg(test)]
+fn params_lvl_90() -> ShortintParameterSet {
+    let wopbs_params = WopbsParameters {
+        lwe_dimension: LweDimension(688),
+        glwe_dimension: GlweDimension(4),
+        polynomial_size: PolynomialSize(512),
+        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            6.676348397087967e-5,
+        )),
+        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            2.845267479601915e-15,
+        )),
+        pbs_level: DecompositionLevelCount(7),
+        pbs_base_log: DecompositionBaseLog(6),
+        ks_level: DecompositionLevelCount(7),
+        ks_base_log: DecompositionBaseLog(2),
+        cbs_level: DecompositionLevelCount(3),
+        cbs_base_log: DecompositionBaseLog(8),
+        pfks_level: DecompositionLevelCount(3),
+        pfks_base_log: DecompositionBaseLog(12),
+        pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            2.845267479601915e-15,
+        )),
+        message_modulus: MessageModulus(2),
+        carry_modulus: CarryModulus(1),
+        ciphertext_modulus: CiphertextModulus::new_native(),
+        encryption_key_choice: EncryptionKeyChoice::Big,
+    };
+
+    let pbs_params = ClassicPBSParameters {
+        lwe_dimension: wopbs_params.lwe_dimension,
+        glwe_dimension: wopbs_params.glwe_dimension,
+        polynomial_size: wopbs_params.polynomial_size,
+        lwe_noise_distribution: wopbs_params.lwe_noise_distribution,
+        glwe_noise_distribution: wopbs_params.glwe_noise_distribution,
+        pbs_base_log: wopbs_params.pbs_base_log,
+        pbs_level: wopbs_params.pbs_level,
+        ks_base_log: wopbs_params.ks_base_log,
+        ks_level: wopbs_params.ks_level,
+        message_modulus: wopbs_params.message_modulus,
+        carry_modulus: wopbs_params.carry_modulus,
+        max_noise_level: MaxNoiseLevel::new(90),
+        log2_p_fail: -64.074,
+        ciphertext_modulus: wopbs_params.ciphertext_modulus,
+        encryption_key_choice: wopbs_params.encryption_key_choice,
+    };
+
+    ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
+}
+
 /// Ciphertext representing a single bit and encrypted for use in circuit bootstrapping. Encrypted under GLWE key
 #[derive(Clone)]
 pub struct BitCt {
@@ -647,6 +711,12 @@ pub mod test {
 
     pub static KEYS_LVL_11: LazyLock<(Arc<ClientKey>, FheContext)> =
         LazyLock::new(|| keys_impl(params_lvl_11()));
+
+    pub static KEYS_LVL_45: LazyLock<(Arc<ClientKey>, FheContext)> =
+        LazyLock::new(|| keys_impl(params_lvl_45()));
+
+    pub static KEYS_LVL_90: LazyLock<(Arc<ClientKey>, FheContext)> =
+        LazyLock::new(|| keys_impl(params_lvl_90()));
 
     fn keys_impl(params: ShortintParameterSet) -> (Arc<ClientKey>, FheContext) {
         let (client_key, context) = FheContext::generate_keys_with_params(params);
