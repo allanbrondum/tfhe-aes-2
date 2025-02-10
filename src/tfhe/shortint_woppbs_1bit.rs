@@ -40,7 +40,7 @@ fn params_lvl_1() -> ShortintParameterSet {
         glwe_dimension: GlweDimension(2),
         polynomial_size: PolynomialSize(1024),
         lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            6.676348397087967e-05,
+            6.676348397087967e-5,
         )),
         glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
             0.00000000000000022148688116005568,
