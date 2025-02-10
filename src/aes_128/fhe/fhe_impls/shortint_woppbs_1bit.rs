@@ -14,13 +14,11 @@ use itertools::Itertools;
 use std::sync::OnceLock;
 use tfhe::shortint::wopbs::WopbsLUTBase;
 
-impl fhe_sbox_pbs::ByteT for Byte<BitCt> {
-    fn bootstrap_assign(&mut self) {
+impl Byte<BitCt> {
+    fn bootstrap_assign(&mut self, lut_static: &OnceLock<WopbsLUTBase>) {
         let context = &self.bits().find_first(|_| true).unwrap().context.clone();
 
-        static IDENTITY_LUT: OnceLock<WopbsLUTBase> = OnceLock::new();
-        let lut =
-            IDENTITY_LUT.get_or_init(|| context.generate_lookup_table(1, 1, |bit| bit as u64));
+        let lut = lut_static.get_or_init(|| context.generate_lookup_table(1, 1, |bit| bit as u64));
 
         self.bits_mut().for_each(|bit| {
             *bit = context
@@ -31,11 +29,10 @@ impl fhe_sbox_pbs::ByteT for Byte<BitCt> {
         });
     }
 
-    fn sbox_substitute(&self) -> Self {
+    fn sbox_substitute(&self, lut_static: &OnceLock<WopbsLUTBase>) -> Self {
         let context = &self.bits().find_first(|_| true).unwrap().context;
 
-        static SBOX_LUT: OnceLock<WopbsLUTBase> = OnceLock::new();
-        let lut = SBOX_LUT
+        let lut = lut_static
             .get_or_init(|| context.generate_lookup_table(8, 8, |byte| SBOX[byte as usize] as u64));
 
         let new_bits = context
@@ -44,6 +41,18 @@ impl fhe_sbox_pbs::ByteT for Byte<BitCt> {
             .expect("8 bits");
 
         Self(new_bits)
+    }
+}
+
+impl fhe_sbox_pbs::ByteT for Byte<BitCt> {
+    fn bootstrap_assign(&mut self) {
+        static IDENTITY_LUT: OnceLock<WopbsLUTBase> = OnceLock::new();
+        self.bootstrap_assign(&IDENTITY_LUT)
+    }
+
+    fn sbox_substitute(&self) -> Self {
+        static SBOX_LUT: OnceLock<WopbsLUTBase> = OnceLock::new();
+        self.sbox_substitute(&SBOX_LUT)
     }
 }
 
@@ -73,35 +82,13 @@ impl Aes128Encrypt for ShortintWoppbs1BitSboxPbsAesEncrypt {
 
 impl fhe_sbox_gal_mul_pbs::ByteT for Byte<BitCt> {
     fn bootstrap_assign(&mut self) {
-        let context = &self.bits().find_first(|_| true).unwrap().context.clone();
-
         static IDENTITY_LUT: OnceLock<WopbsLUTBase> = OnceLock::new();
-        let lut =
-            IDENTITY_LUT.get_or_init(|| context.generate_lookup_table(1, 1, |bit| bit as u64));
-
-        self.bits_mut().for_each(|bit| {
-            *bit = context
-                .circuit_bootstrap(&[bit], lut)
-                .into_iter()
-                .next()
-                .expect("one bit");
-        });
-
+        self.bootstrap_assign(&IDENTITY_LUT)
     }
 
     fn sbox_substitute(&self) -> Self {
-        let context = &self.bits().find_first(|_| true).unwrap().context;
-
         static SBOX_LUT: OnceLock<WopbsLUTBase> = OnceLock::new();
-        let lut = SBOX_LUT
-            .get_or_init(|| context.generate_lookup_table(8, 8, |byte| SBOX[byte as usize] as u64));
-
-        let new_bits = context
-            .circuit_bootstrap(&self.0.each_ref(), lut)
-            .try_into()
-            .expect("8 bits");
-
-        Self(new_bits)
+        self.sbox_substitute(&SBOX_LUT)
     }
 
     fn sbox_substitute_and_gal_mul(&self) -> [Self; 3] {
