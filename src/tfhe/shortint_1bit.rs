@@ -59,7 +59,7 @@ use tracing::debug;
 //     encryption_key_choice: EncryptionKeyChoice::Small,
 // };
 
-/// !Testing parameters! not valid for real usage
+/// todo !Testing parameters! not valid for real usage
 const PARAMS: ClassicPBSParameters = ClassicPBSParameters {
     lwe_dimension: LweDimension(640),
     glwe_dimension: GlweDimension(4),
@@ -543,6 +543,7 @@ pub fn calculate_multivariate_function(
 ) -> BitCt {
     assert_eq!(bit_cts.len(), mv_test_vector.bits);
     apply_selectors_rec(context, bit_cts, &mv_test_vector.test_vectors)
+    // todo set noise level of output based on input dimension
 }
 
 fn apply_selectors_rec(

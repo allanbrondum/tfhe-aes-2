@@ -73,11 +73,35 @@ impl Aes128Encrypt for ShortintWoppbs1BitSboxPbsAesEncrypt {
 
 impl fhe_sbox_gal_mul_pbs::ByteT for Byte<BitCt> {
     fn bootstrap_assign(&mut self) {
-        <Self as fhe_sbox_pbs::ByteT>::bootstrap_assign(self)
+        let context = &self.bits().find_first(|_| true).unwrap().context.clone();
+
+        static IDENTITY_LUT: OnceLock<WopbsLUTBase> = OnceLock::new();
+        let lut =
+            IDENTITY_LUT.get_or_init(|| context.generate_lookup_table(1, 1, |bit| bit as u64));
+
+        self.bits_mut().for_each(|bit| {
+            *bit = context
+                .circuit_bootstrap(&[bit], lut)
+                .into_iter()
+                .next()
+                .expect("one bit");
+        });
+
     }
 
     fn sbox_substitute(&self) -> Self {
-        <Self as fhe_sbox_pbs::ByteT>::sbox_substitute(self)
+        let context = &self.bits().find_first(|_| true).unwrap().context;
+
+        static SBOX_LUT: OnceLock<WopbsLUTBase> = OnceLock::new();
+        let lut = SBOX_LUT
+            .get_or_init(|| context.generate_lookup_table(8, 8, |byte| SBOX[byte as usize] as u64));
+
+        let new_bits = context
+            .circuit_bootstrap(&self.0.each_ref(), lut)
+            .try_into()
+            .expect("8 bits");
+
+        Self(new_bits)
     }
 
     fn sbox_substitute_and_gal_mul(&self) -> [Self; 3] {
