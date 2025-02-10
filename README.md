@@ -44,11 +44,7 @@ in the WoP-PBS experimental features in `tfhe-rs`. Each shortint ciphertext repr
 Additional primitives are implemented in the library at hand to support
 multivariate and multivalued functions, but these higher level primitives still builds on the low-level primitives in `tfhe-rs`.
 
-To be conservative, the model parameters `WopbsParameters` used in the binary are based on 8-bit cleartext precision, since
-we do 8-bit input multivariate circuit bootstrapping. By analyzing the noise in the circuit bootstrapping, this bound
-could very well be tightened and effectiveness improved. 
-
-The effectiveness if this model can also be improved by running the boolean bootstrapping of GGSW ciphertexts in
+As a comment, the effectiveness if this model can be improved by running the boolean bootstrapping of GGSW ciphertexts in
 `fft64::crypto::wop_pbs::circuit_bootstrap_boolean` in parallel. 
 
 ### `shorint_woppbs_8bit`
