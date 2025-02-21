@@ -18,10 +18,7 @@ use crate::tfhe::shortint_woppbs_1bit::parameters::Shortint1bitWopbsParameters;
 use crate::util;
 use rayon::iter::ParallelIterator;
 use tfhe::shortint::wopbs::{WopbsKey, WopbsLUTBase};
-use tfhe::shortint::{
-    CarryModulus, ClassicPBSParameters, MaxNoiseLevel, MessageModulus, ShortintParameterSet,
-    WopbsParameters,
-};
+use tfhe::shortint::{CarryModulus, MessageModulus};
 use tracing::debug;
 
 /// Ciphertext representing a single bit and encrypted for use in circuit bootstrapping. Encrypted under GLWE key
@@ -137,8 +134,8 @@ impl ContextT for FheContext {
 }
 
 pub struct ClientKey {
-    #[allow(unused)]
     glwe_secret_key: GlweSecretKeyOwned<u64>,
+    #[allow(unused)]
     lwe_secret_key: LweSecretKeyOwned<u64>,
     shortint_client_key: shortint::ClientKey,
     context: FheContext,
@@ -394,15 +391,6 @@ pub mod test {
 
     pub static KEYS_SQRD_LVL_128: LazyLock<(Arc<ClientKey>, FheContext)> =
         LazyLock::new(|| keys_impl(parameters::params_sqrd_lvl_128()));
-
-    // pub static KEYS_LVL_11: LazyLock<(Arc<ClientKey>, FheContext)> =
-    //     LazyLock::new(|| keys_impl(parameters::params_lvl_11()));
-
-    // pub static KEYS_LVL_45: LazyLock<(Arc<ClientKey>, FheContext)> =
-    //     LazyLock::new(|| keys_impl(parameters::params_lvl_45()));
-    //
-    // pub static KEYS_LVL_90: LazyLock<(Arc<ClientKey>, FheContext)> =
-    //     LazyLock::new(|| keys_impl(parameters::params_lvl_90()));
 
     fn keys_impl(params: Shortint1bitWopbsParameters) -> (Arc<ClientKey>, FheContext) {
         let (client_key, context) = FheContext::generate_keys_with_params(params);
