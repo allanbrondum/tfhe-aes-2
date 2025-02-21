@@ -79,7 +79,8 @@ fn main() -> anyhow::Result<()> {
             );
         }
         Implementation::ShortintWoppbs1bit => {
-            let (client_key, context) = shortint_woppbs_1bit::FheContext::generate_keys_lvl_45();
+            let (client_key, context) =
+                shortint_woppbs_1bit::FheContext::generate_keys_sqrd_lvl_64();
             run_client_server_aes_scenario::<ShortintWoppbs1BitSboxGalMulPbsAesEncrypt, _>(
                 &client_key,
                 &context,

@@ -1,5 +1,7 @@
 //! Model with each ciphertext representing 1 bit. Build on `tfhe-rs` `shortint` module with WoP-PBS.
 
+mod parameters;
+
 use crate::tfhe::{ClientKeyT, ContextT};
 
 use rayon::iter::IntoParallelRefIterator;
@@ -11,6 +13,8 @@ use tfhe::core_crypto::prelude::*;
 use tfhe::shortint;
 use tfhe::shortint::ciphertext::{Degree, NoiseLevel};
 
+use crate::tfhe::engine::ShortintEngine;
+use crate::tfhe::shortint_woppbs_1bit::parameters::Shortint1bitWopbsParameters;
 use crate::util;
 use rayon::iter::ParallelIterator;
 use tfhe::shortint::wopbs::{WopbsKey, WopbsLUTBase};
@@ -20,389 +24,13 @@ use tfhe::shortint::{
 };
 use tracing::debug;
 
-/// Parameters created from
-///
-/// ```text
-/// ./optimizer  --min-precision 1 --max-precision 1 --p-error 5.42101086e-20 --ciphertext-modulus-log 64 --wop-pbs
-/// security level: 128
-/// target p_error: 5.4e-20
-/// per precision and log norm2:
-///
-/// - 1: # bits
-/// -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b, cb_l,cb_b, pp_l,pp_b,  cost, p_error
-/// ...
-/// - 0 :   2, 10,  671,    2, 15,     4,  3,     1, 10,     1, 24,    111, 4.2e-20
-/// ...
-/// ```
-fn params_lvl_1() -> ShortintParameterSet {
-    let wopbs_params = WopbsParameters {
-        lwe_dimension: LweDimension(671),
-        glwe_dimension: GlweDimension(2),
-        polynomial_size: PolynomialSize(1024),
-        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            6.676348397087967e-5,
-        )),
-        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568,
-        )),
-        pbs_level: DecompositionLevelCount(2),
-        pbs_base_log: DecompositionBaseLog(15),
-        ks_level: DecompositionLevelCount(4),
-        ks_base_log: DecompositionBaseLog(3),
-        cbs_level: DecompositionLevelCount(1),
-        cbs_base_log: DecompositionBaseLog(10),
-        pfks_level: DecompositionLevelCount(1),
-        pfks_base_log: DecompositionBaseLog(24),
-        pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568,
-        )),
-        message_modulus: MessageModulus(2),
-        carry_modulus: CarryModulus(1),
-        ciphertext_modulus: CiphertextModulus::new_native(),
-        encryption_key_choice: EncryptionKeyChoice::Big,
-    };
-
-    let pbs_params = ClassicPBSParameters {
-        lwe_dimension: wopbs_params.lwe_dimension,
-        glwe_dimension: wopbs_params.glwe_dimension,
-        polynomial_size: wopbs_params.polynomial_size,
-        lwe_noise_distribution: wopbs_params.lwe_noise_distribution,
-        glwe_noise_distribution: wopbs_params.glwe_noise_distribution,
-        pbs_base_log: wopbs_params.pbs_base_log,
-        pbs_level: wopbs_params.pbs_level,
-        ks_base_log: wopbs_params.ks_base_log,
-        ks_level: wopbs_params.ks_level,
-        message_modulus: wopbs_params.message_modulus,
-        carry_modulus: wopbs_params.carry_modulus,
-        max_noise_level: MaxNoiseLevel::new(1),
-        log2_p_fail: -64.074,
-        ciphertext_modulus: wopbs_params.ciphertext_modulus,
-        encryption_key_choice: wopbs_params.encryption_key_choice,
-    };
-
-    ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
-}
-
-/// Parameters created from
-///
-/// ```text
-/// ./optimizer  --min-precision 1 --max-precision 1 --p-error 5.42101086e-20 --ciphertext-modulus-log 64 --wop-pbs
-/// security level: 128
-/// target p_error: 5.4e-20
-/// per precision and log norm2:
-///
-/// - 1: # bits
-/// -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b, cb_l,cb_b, pp_l,pp_b,  cost, p_error
-/// ...
-/// - 5 :   2, 10,  649,    6,  7,     6,  2,     1, 15,     3, 12,    268, 4.8e-20
-/// ...
-/// ```
-fn params_lvl_5() -> ShortintParameterSet {
-    let wopbs_params = WopbsParameters {
-        lwe_dimension: LweDimension(649),
-        glwe_dimension: GlweDimension(2),
-        polynomial_size: PolynomialSize(1024),
-        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            6.27510880527384e-05,
-        )),
-        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568,
-        )),
-        pbs_level: DecompositionLevelCount(6),
-        pbs_base_log: DecompositionBaseLog(7),
-        ks_level: DecompositionLevelCount(6),
-        ks_base_log: DecompositionBaseLog(2),
-        cbs_level: DecompositionLevelCount(1),
-        cbs_base_log: DecompositionBaseLog(15),
-        pfks_level: DecompositionLevelCount(3),
-        pfks_base_log: DecompositionBaseLog(12),
-        pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568,
-        )),
-        message_modulus: MessageModulus(2),
-        carry_modulus: CarryModulus(1),
-        ciphertext_modulus: CiphertextModulus::new_native(),
-        encryption_key_choice: EncryptionKeyChoice::Big,
-    };
-
-    let pbs_params = ClassicPBSParameters {
-        lwe_dimension: wopbs_params.lwe_dimension,
-        glwe_dimension: wopbs_params.glwe_dimension,
-        polynomial_size: wopbs_params.polynomial_size,
-        lwe_noise_distribution: wopbs_params.lwe_noise_distribution,
-        glwe_noise_distribution: wopbs_params.glwe_noise_distribution,
-        pbs_base_log: wopbs_params.pbs_base_log,
-        pbs_level: wopbs_params.pbs_level,
-        ks_base_log: wopbs_params.ks_base_log,
-        ks_level: wopbs_params.ks_level,
-        message_modulus: wopbs_params.message_modulus,
-        carry_modulus: wopbs_params.carry_modulus,
-        max_noise_level: MaxNoiseLevel::new(5),
-        log2_p_fail: -64.074,
-        ciphertext_modulus: wopbs_params.ciphertext_modulus,
-        encryption_key_choice: wopbs_params.encryption_key_choice,
-    };
-
-    ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
-}
-
-/// Parameters created from
-///
-/// ```text
-/// ./optimizer  --min-precision 8 --max-precision 8 --p-error 5.42101086e-20 --ciphertext-modulus-log 64 --wop-pbs
-/// security level: 128
-/// target p_error: 5.4e-20
-/// per precision and log norm2:
-///
-///   - 8: # bits
-///     -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b, cb_l,cb_b, pp_l,pp_b,  cost, p_error
-/// ...
-///     - 5 :   2, 10,  785,    5,  8,     8,  2,     3,  7,     3, 12,   8465, 5.4e-20
-/// ...
-/// ```
-fn params_lvl_5_precision_8() -> ShortintParameterSet {
-    let wopbs_params = WopbsParameters {
-        lwe_dimension: LweDimension(785),
-        glwe_dimension: GlweDimension(2),
-        polynomial_size: PolynomialSize(1024),
-        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            1.5140301927925663e-5,
-        )),
-        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568,
-        )),
-        pbs_level: DecompositionLevelCount(5),
-        pbs_base_log: DecompositionBaseLog(8),
-        ks_level: DecompositionLevelCount(8),
-        ks_base_log: DecompositionBaseLog(2),
-        cbs_level: DecompositionLevelCount(3),
-        cbs_base_log: DecompositionBaseLog(7),
-        pfks_level: DecompositionLevelCount(3),
-        pfks_base_log: DecompositionBaseLog(12),
-        pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568,
-        )),
-        message_modulus: MessageModulus(2),
-        carry_modulus: CarryModulus(1),
-        ciphertext_modulus: CiphertextModulus::new_native(),
-        encryption_key_choice: EncryptionKeyChoice::Big,
-    };
-
-    let pbs_params = ClassicPBSParameters {
-        lwe_dimension: wopbs_params.lwe_dimension,
-        glwe_dimension: wopbs_params.glwe_dimension,
-        polynomial_size: wopbs_params.polynomial_size,
-        lwe_noise_distribution: wopbs_params.lwe_noise_distribution,
-        glwe_noise_distribution: wopbs_params.glwe_noise_distribution,
-        pbs_base_log: wopbs_params.pbs_base_log,
-        pbs_level: wopbs_params.pbs_level,
-        ks_base_log: wopbs_params.ks_base_log,
-        ks_level: wopbs_params.ks_level,
-        message_modulus: wopbs_params.message_modulus,
-        carry_modulus: wopbs_params.carry_modulus,
-        max_noise_level: MaxNoiseLevel::new(5),
-        log2_p_fail: -64.074,
-        ciphertext_modulus: wopbs_params.ciphertext_modulus,
-        encryption_key_choice: wopbs_params.encryption_key_choice,
-    };
-
-    ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
-}
-
-/// Parameters created from
-///
-/// ```text
-/// ./optimizer  --min-precision 1 --max-precision 1 --p-error 5.42101086e-20 --ciphertext-modulus-log 64 --wop-pbs
-/// security level: 128
-/// target p_error: 5.4e-20
-/// per precision and log norm2:
-///
-/// - 1: # bits
-/// -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b, cb_l,cb_b, pp_l,pp_b,  cost, p_error
-/// ...
-/// - 7 :   4,  9,  661,    3, 12,     6,  2,     2,  9,     2, 16,    353, 5.3e-20
-/// ...
-/// ```
-fn params_lvl_11() -> ShortintParameterSet {
-    let wopbs_params = WopbsParameters {
-        lwe_dimension: LweDimension(661),
-        glwe_dimension: GlweDimension(4),
-        polynomial_size: PolynomialSize(512),
-        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            6.676348397087967e-5,
-        )),
-        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            2.845267479601915e-15,
-        )),
-        pbs_level: DecompositionLevelCount(3),
-        pbs_base_log: DecompositionBaseLog(12),
-        ks_level: DecompositionLevelCount(6),
-        ks_base_log: DecompositionBaseLog(2),
-        cbs_level: DecompositionLevelCount(2),
-        cbs_base_log: DecompositionBaseLog(9),
-        pfks_level: DecompositionLevelCount(2),
-        pfks_base_log: DecompositionBaseLog(16),
-        pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            2.845267479601915e-15,
-        )),
-        message_modulus: MessageModulus(2),
-        carry_modulus: CarryModulus(1),
-        ciphertext_modulus: CiphertextModulus::new_native(),
-        encryption_key_choice: EncryptionKeyChoice::Big,
-    };
-
-    let pbs_params = ClassicPBSParameters {
-        lwe_dimension: wopbs_params.lwe_dimension,
-        glwe_dimension: wopbs_params.glwe_dimension,
-        polynomial_size: wopbs_params.polynomial_size,
-        lwe_noise_distribution: wopbs_params.lwe_noise_distribution,
-        glwe_noise_distribution: wopbs_params.glwe_noise_distribution,
-        pbs_base_log: wopbs_params.pbs_base_log,
-        pbs_level: wopbs_params.pbs_level,
-        ks_base_log: wopbs_params.ks_base_log,
-        ks_level: wopbs_params.ks_level,
-        message_modulus: wopbs_params.message_modulus,
-        carry_modulus: wopbs_params.carry_modulus,
-        max_noise_level: MaxNoiseLevel::new(11),
-        log2_p_fail: -64.074,
-        ciphertext_modulus: wopbs_params.ciphertext_modulus,
-        encryption_key_choice: wopbs_params.encryption_key_choice,
-    };
-
-    ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
-}
-
-/// Parameters created from
-///
-/// ```text
-/// ./optimizer  --min-precision 1 --max-precision 1 --p-error 5.42101086e-20 --ciphertext-modulus-log 64 --wop-pbs
-/// security level: 128
-/// target p_error: 5.4e-20
-/// per precision and log norm2:
-///
-///   - 1: # bits
-///     -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b, cb_l,cb_b, pp_l,pp_b,  cost, p_error
-/// ...
-///     - 11:   2, 10,  640,    5,  8,     6,  2,     3,  7,     3, 12,    687, 4.2e-20
-/// ...
-/// ```
-fn params_lvl_45() -> ShortintParameterSet {
-    let wopbs_params = WopbsParameters {
-        lwe_dimension: LweDimension(640),
-        glwe_dimension: GlweDimension(2),
-        polynomial_size: PolynomialSize(1024),
-        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            6.27510880527384e-05,
-        )),
-        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568,
-        )),
-        pbs_level: DecompositionLevelCount(5),
-        pbs_base_log: DecompositionBaseLog(8),
-        ks_level: DecompositionLevelCount(6),
-        ks_base_log: DecompositionBaseLog(2),
-        cbs_level: DecompositionLevelCount(3),
-        cbs_base_log: DecompositionBaseLog(7),
-        pfks_level: DecompositionLevelCount(3),
-        pfks_base_log: DecompositionBaseLog(12),
-        pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568,
-        )),
-        message_modulus: MessageModulus(2),
-        carry_modulus: CarryModulus(1),
-        ciphertext_modulus: CiphertextModulus::new_native(),
-        encryption_key_choice: EncryptionKeyChoice::Big,
-    };
-
-    let pbs_params = ClassicPBSParameters {
-        lwe_dimension: wopbs_params.lwe_dimension,
-        glwe_dimension: wopbs_params.glwe_dimension,
-        polynomial_size: wopbs_params.polynomial_size,
-        lwe_noise_distribution: wopbs_params.lwe_noise_distribution,
-        glwe_noise_distribution: wopbs_params.glwe_noise_distribution,
-        pbs_base_log: wopbs_params.pbs_base_log,
-        pbs_level: wopbs_params.pbs_level,
-        ks_base_log: wopbs_params.ks_base_log,
-        ks_level: wopbs_params.ks_level,
-        message_modulus: wopbs_params.message_modulus,
-        carry_modulus: wopbs_params.carry_modulus,
-        max_noise_level: MaxNoiseLevel::new(45),
-        log2_p_fail: -64.074,
-        ciphertext_modulus: wopbs_params.ciphertext_modulus,
-        encryption_key_choice: wopbs_params.encryption_key_choice,
-    };
-
-    ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
-}
-
-/// Parameters created from
-///
-/// ```text
-/// ./optimizer  --min-precision 1 --max-precision 1 --p-error 5.42101086e-20 --ciphertext-modulus-log 64 --wop-pbs
-/// security level: 128
-/// target p_error: 5.4e-20
-/// per precision and log norm2:
-///
-///   - 1: # bits
-///     -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b, cb_l,cb_b, pp_l,pp_b,  cost, p_error
-/// ...
-/// - 13:   4,  9,  688,    7,  6,     7,  2,     3,  8,     3, 12,    959, 5.0e-20
-/// ...
-/// ```
-#[cfg(test)]
-fn params_lvl_90() -> ShortintParameterSet {
-    let wopbs_params = WopbsParameters {
-        lwe_dimension: LweDimension(688),
-        glwe_dimension: GlweDimension(4),
-        polynomial_size: PolynomialSize(512),
-        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            6.676348397087967e-5,
-        )),
-        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            2.845267479601915e-15,
-        )),
-        pbs_level: DecompositionLevelCount(7),
-        pbs_base_log: DecompositionBaseLog(6),
-        ks_level: DecompositionLevelCount(7),
-        ks_base_log: DecompositionBaseLog(2),
-        cbs_level: DecompositionLevelCount(3),
-        cbs_base_log: DecompositionBaseLog(8),
-        pfks_level: DecompositionLevelCount(3),
-        pfks_base_log: DecompositionBaseLog(12),
-        pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            2.845267479601915e-15,
-        )),
-        message_modulus: MessageModulus(2),
-        carry_modulus: CarryModulus(1),
-        ciphertext_modulus: CiphertextModulus::new_native(),
-        encryption_key_choice: EncryptionKeyChoice::Big,
-    };
-
-    let pbs_params = ClassicPBSParameters {
-        lwe_dimension: wopbs_params.lwe_dimension,
-        glwe_dimension: wopbs_params.glwe_dimension,
-        polynomial_size: wopbs_params.polynomial_size,
-        lwe_noise_distribution: wopbs_params.lwe_noise_distribution,
-        glwe_noise_distribution: wopbs_params.glwe_noise_distribution,
-        pbs_base_log: wopbs_params.pbs_base_log,
-        pbs_level: wopbs_params.pbs_level,
-        ks_base_log: wopbs_params.ks_base_log,
-        ks_level: wopbs_params.ks_level,
-        message_modulus: wopbs_params.message_modulus,
-        carry_modulus: wopbs_params.carry_modulus,
-        max_noise_level: MaxNoiseLevel::new(90),
-        log2_p_fail: -64.074,
-        ciphertext_modulus: wopbs_params.ciphertext_modulus,
-        encryption_key_choice: wopbs_params.encryption_key_choice,
-    };
-
-    ShortintParameterSet::try_new_pbs_and_wopbs_param_set((pbs_params, wopbs_params)).unwrap()
-}
-
 /// Ciphertext representing a single bit and encrypted for use in circuit bootstrapping. Encrypted under GLWE key
 #[derive(Clone)]
 pub struct BitCt {
-    ct: shortint::Ciphertext,
+    ct: LweCiphertextOwned<u64>,
+    /// Squared noise level (compared to how noise level is used in `shortint` module).
+    /// It measures the error/noise variance relative to the "nominal" level (1).
+    noise_level_squared: NoiseLevel,
     pub context: FheContext,
 }
 
@@ -413,8 +41,20 @@ impl Debug for BitCt {
 }
 
 impl BitCt {
-    pub fn new(ct: shortint::Ciphertext, context: FheContext) -> Self {
-        Self { ct, context }
+    pub fn fresh(ct: LweCiphertextOwned<u64>, context: FheContext) -> Self {
+        Self::with_noise_level(ct, NoiseLevel::NOMINAL, context)
+    }
+
+    pub fn with_noise_level(
+        ct: LweCiphertextOwned<u64>,
+        noise_level_squared: NoiseLevel,
+        context: FheContext,
+    ) -> Self {
+        Self {
+            ct,
+            noise_level_squared,
+            context,
+        }
     }
 
     fn trivial(bit: Cleartext<u64>, context: FheContext) -> Self {
@@ -428,10 +68,17 @@ impl BitCt {
             CiphertextModulus::new_native(),
         );
 
-        Self {
-            ct: wrap_in_shortint(ct, NoiseLevel::ZERO),
-            context,
-        }
+        Self::with_noise_level(ct, NoiseLevel::ZERO, context)
+    }
+
+    fn set_noise_level(&mut self, noise_level_squared: NoiseLevel) {
+        self.context
+            .parameters
+            .max_noise_level_squared
+            .validate(noise_level_squared)
+            .unwrap();
+
+        self.noise_level_squared = noise_level_squared;
     }
 }
 
@@ -446,9 +93,10 @@ pub fn decode_bit(encoding: Plaintext<u64>) -> Cleartext<u64> {
 
 impl BitXorAssign<&BitCt> for BitCt {
     fn bitxor_assign(&mut self, rhs: &Self) {
-        self.context
-            .server_key
-            .unchecked_add_assign(&mut self.ct, &rhs.ct);
+        lwe_linear_algebra::lwe_ciphertext_add_assign(&mut self.ct, &rhs.ct);
+        #[allow(clippy::suspicious_op_assign_impl)]
+        self.set_noise_level(self.noise_level_squared + rhs.noise_level_squared);
+        // todo check independent
     }
 }
 
@@ -477,6 +125,7 @@ impl DualCiphertext {
 pub struct FheContext {
     server_key: Arc<shortint::server_key::ServerKey>,
     wopbs_key: Arc<shortint::wopbs::WopbsKey>,
+    parameters: Shortint1bitWopbsParameters,
 }
 
 impl ContextT for FheContext {
@@ -488,6 +137,9 @@ impl ContextT for FheContext {
 }
 
 pub struct ClientKey {
+    #[allow(unused)]
+    glwe_secret_key: GlweSecretKeyOwned<u64>,
+    lwe_secret_key: LweSecretKeyOwned<u64>,
     shortint_client_key: shortint::ClientKey,
     context: FheContext,
 }
@@ -496,54 +148,75 @@ impl ClientKeyT for ClientKey {
     type Bit = BitCt;
 
     fn encrypt(&self, bit: Cleartext<u64>) -> BitCt {
-        let ct = self.shortint_client_key.encrypt_without_padding(bit.0);
+        let (encryption_lwe_sk, encryption_noise_distribution) = (
+            self.glwe_secret_key.as_lwe_secret_key(),
+            self.shortint_client_key.parameters.lwe_noise_distribution(),
+        );
 
-        BitCt::new(ct, self.context.clone())
+        let ct = ShortintEngine::with_thread_local_mut(|engine| {
+            lwe_encryption::allocate_and_encrypt_new_lwe_ciphertext(
+                &encryption_lwe_sk,
+                encode_bit(bit),
+                encryption_noise_distribution,
+                self.shortint_client_key.parameters.ciphertext_modulus(),
+                &mut engine.encryption_generator,
+            )
+        });
+
+        BitCt::fresh(ct, self.context.clone())
     }
 
     fn decrypt(&self, bit: &BitCt) -> Cleartext<u64> {
-        Cleartext(self.shortint_client_key.decrypt_without_padding(&bit.ct))
+        let encoding = lwe_encryption::decrypt_lwe_ciphertext(
+            &self.glwe_secret_key.as_lwe_secret_key(),
+            &bit.ct,
+        );
+        decode_bit(encoding)
     }
 }
 
 impl FheContext {
-    /// Model allowing 1 (max noise level) leveled operations
-    pub fn generate_keys_lvl_1() -> (ClientKey, Self) {
-        Self::generate_keys_with_params(params_lvl_1())
+    pub fn generate_keys_sqrd_lvl_1() -> (ClientKey, Self) {
+        Self::generate_keys_with_params(parameters::params_sqrd_lvl_1())
     }
 
-    /// Model allowing 5 (max noise level) leveled operations
-    pub fn generate_keys_lvl_5() -> (ClientKey, Self) {
-        Self::generate_keys_with_params(params_lvl_5())
+    pub fn generate_keys_sqrd_lvl_32() -> (ClientKey, Self) {
+        Self::generate_keys_with_params(parameters::params_sqrd_lvl_32())
     }
 
-    /// Model allowing 5 (max noise level) leveled operations. Has
-    /// 8 bits of cleartext precision.
-    pub fn generate_keys_lvl_5_precision_8() -> (ClientKey, Self) {
-        Self::generate_keys_with_params(params_lvl_5_precision_8())
+    pub fn generate_keys_sqrd_lvl_64() -> (ClientKey, Self) {
+        Self::generate_keys_with_params(parameters::params_sqrd_lvl_64())
     }
 
-    /// Model allowing 11 (max noise level) leveled operations
-    pub fn generate_keys_lvl_11() -> (ClientKey, Self) {
-        Self::generate_keys_with_params(params_lvl_11())
+    pub fn generate_keys_sqrd_lvl_128() -> (ClientKey, Self) {
+        Self::generate_keys_with_params(parameters::params_sqrd_lvl_128())
     }
 
-    /// Model allowing 45 (max noise level) leveled operations
-    pub fn generate_keys_lvl_45() -> (ClientKey, Self) {
-        Self::generate_keys_with_params(params_lvl_45())
+    pub fn generate_keys_sqrd_lvl_256() -> (ClientKey, Self) {
+        Self::generate_keys_with_params(parameters::params_sqrd_lvl_256())
     }
 
-    fn generate_keys_with_params(params: ShortintParameterSet) -> (ClientKey, Self) {
-        let (shortint_client_key, server_key) = shortint::gen_keys(params);
+    pub fn generate_keys_sqrd_lvl_2048() -> (ClientKey, Self) {
+        Self::generate_keys_with_params(parameters::params_sqrd_lvl_2048())
+    }
+
+    fn generate_keys_with_params(parameters: Shortint1bitWopbsParameters) -> (ClientKey, Self) {
+        let (shortint_client_key, server_key) = shortint::gen_keys(parameters.inner);
 
         let wops_key = WopbsKey::new_wopbs_key_only_for_wopbs(&shortint_client_key, &server_key);
 
         let context = FheContext {
             server_key: server_key.into(),
             wopbs_key: wops_key.into(),
+            parameters,
         };
 
+        let (glwe_secret_key, lwe_secret_key, _parameters) =
+            shortint_client_key.clone().into_raw_parts();
+
         let client_key = ClientKey {
+            glwe_secret_key,
+            lwe_secret_key,
             shortint_client_key,
             context: context.clone(),
         };
@@ -603,14 +276,16 @@ impl FheContext {
             },
         );
 
-        // In Lemma 3.2 in https://eprint.iacr.org/2017/430.pdf, the number of "selector" input ciphertexts
-        // acts as a multiplier on the noise. Hence, we multiply with the number of input bits.
+        // In Lemma 3.2 in https://eprint.iacr.org/2017/430.pdf, the number of "selector"/"controller" input ciphertexts
+        // acts as a multiplier on the error variance. Hence, we multiply the (squared) nominal noise level with
+        // the number of input bits. Notice that the "selector" TRGSW ciphertexts have independent noise since they are
+        // independent boolean bootstraps of the input bits (happens in circuit_bootstrapping_vertical_packing).
         let output_noise_level = NoiseLevel::NOMINAL * input_bit_count as u64;
         let bit_cts: Vec<_> = self
             .wopbs_key
             .circuit_bootstrapping_vertical_packing(lut, &dual_bits_list_ct)
             .into_iter()
-            .map(|lwe_ct| BitCt::new(wrap_in_shortint(lwe_ct, output_noise_level), self.clone()))
+            .map(|lwe_ct| BitCt::with_noise_level(lwe_ct, output_noise_level, self.clone()))
             .collect();
 
         debug!("multivalued circuit bootstrap {:?}", start.elapsed());
@@ -622,9 +297,14 @@ impl FheContext {
     fn extract_dual_bit_from_bit(&self, ct: &BitCt) -> DualCiphertext {
         let start = Instant::now();
 
-        let bit_cts = self
-            .wopbs_key
-            .extract_bits(DeltaLog(63), &ct.ct, ExtractedBitsCount(1));
+        let bit_cts = self.wopbs_key.extract_bits(
+            DeltaLog(63),
+            &wrap_in_shortint(
+                ct.ct.clone(),
+                NoiseLevel::NOMINAL * ((ct.noise_level_squared.get() - 1).isqrt() + 1),
+            ),
+            ExtractedBitsCount(1),
+        );
 
         let bit_ct = bit_cts.iter().next().expect("one bit");
 
@@ -703,22 +383,28 @@ pub mod test {
     use std::sync::{Arc, LazyLock};
     use tracing::level_filters::LevelFilter;
 
-    pub static KEYS_LVL_1: LazyLock<(Arc<ClientKey>, FheContext)> =
-        LazyLock::new(|| keys_impl(params_lvl_1()));
+    pub static KEYS_SQRD_LVL_1: LazyLock<(Arc<ClientKey>, FheContext)> =
+        LazyLock::new(|| keys_impl(parameters::params_sqrd_lvl_1()));
 
-    pub static KEYS_LVL_5: LazyLock<(Arc<ClientKey>, FheContext)> =
-        LazyLock::new(|| keys_impl(params_lvl_5()));
+    pub static KEYS_SQRD_LVL_32: LazyLock<(Arc<ClientKey>, FheContext)> =
+        LazyLock::new(|| keys_impl(parameters::params_sqrd_lvl_32()));
 
-    pub static KEYS_LVL_11: LazyLock<(Arc<ClientKey>, FheContext)> =
-        LazyLock::new(|| keys_impl(params_lvl_11()));
+    pub static KEYS_SQRD_LVL_64: LazyLock<(Arc<ClientKey>, FheContext)> =
+        LazyLock::new(|| keys_impl(parameters::params_sqrd_lvl_64()));
 
-    pub static KEYS_LVL_45: LazyLock<(Arc<ClientKey>, FheContext)> =
-        LazyLock::new(|| keys_impl(params_lvl_45()));
+    pub static KEYS_SQRD_LVL_128: LazyLock<(Arc<ClientKey>, FheContext)> =
+        LazyLock::new(|| keys_impl(parameters::params_sqrd_lvl_128()));
 
-    pub static KEYS_LVL_90: LazyLock<(Arc<ClientKey>, FheContext)> =
-        LazyLock::new(|| keys_impl(params_lvl_90()));
+    // pub static KEYS_LVL_11: LazyLock<(Arc<ClientKey>, FheContext)> =
+    //     LazyLock::new(|| keys_impl(parameters::params_lvl_11()));
 
-    fn keys_impl(params: ShortintParameterSet) -> (Arc<ClientKey>, FheContext) {
+    // pub static KEYS_LVL_45: LazyLock<(Arc<ClientKey>, FheContext)> =
+    //     LazyLock::new(|| keys_impl(parameters::params_lvl_45()));
+    //
+    // pub static KEYS_LVL_90: LazyLock<(Arc<ClientKey>, FheContext)> =
+    //     LazyLock::new(|| keys_impl(parameters::params_lvl_90()));
+
+    fn keys_impl(params: Shortint1bitWopbsParameters) -> (Arc<ClientKey>, FheContext) {
         let (client_key, context) = FheContext::generate_keys_with_params(params);
         (client_key.into(), context)
     }
@@ -741,7 +427,7 @@ pub mod test {
 
     #[test]
     fn test_bit() {
-        let (client_key, context) = KEYS_LVL_5.clone();
+        let (client_key, context) = KEYS_SQRD_LVL_32.clone();
 
         let b1 = client_key.encrypt(Cleartext(0));
         let b2 = client_key.encrypt(Cleartext(1));
@@ -789,7 +475,7 @@ pub mod test {
     }
 
     fn test_multivariate_parity_fn_impl(bits: usize, word: u16) {
-        let (client_key, context) = KEYS_LVL_5.clone();
+        let (client_key, context) = KEYS_SQRD_LVL_32.clone();
 
         let parity_fn =
             |val: u16| -> u64 { (util::u16_to_bits(val).iter().sum::<u8>() % 2) as u64 };
@@ -832,7 +518,7 @@ pub mod test {
     }
 
     fn test_multivariate_multivalued_square_fn_impl(bits: usize, byte: u16) {
-        let (client_key, context) = KEYS_LVL_5.clone();
+        let (client_key, context) = KEYS_SQRD_LVL_32.clone();
 
         let square_fn = |val: u16| -> u64 { (val * val % (1 << bits)) as u64 };
 
@@ -867,7 +553,7 @@ pub mod test {
     fn test_xor_8bit() {
         logger::test_init(LevelFilter::DEBUG);
 
-        let (client_key, context) = KEYS_LVL_1.clone();
+        let (client_key, context) = KEYS_SQRD_LVL_1.clone();
 
         let b1 = 0b11000110;
         let b2 = 0b10101010;

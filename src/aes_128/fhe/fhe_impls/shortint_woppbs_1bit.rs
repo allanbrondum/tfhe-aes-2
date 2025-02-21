@@ -156,12 +156,10 @@ mod test {
         ShortintWoppbs1BitSboxGalMulPbsAesEncrypt, ShortintWoppbs1BitSboxPbsAesEncrypt,
     };
     use crate::aes_128::test_helper;
-    use crate::logger;
-    use tracing::metadata::LevelFilter;
 
     #[test]
     fn test_light() {
-        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_LVL_90.clone();
+        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_SQRD_LVL_128.clone();
 
         test_helper::test_light::<ShortintWoppbs1BitSboxPbsAesEncrypt, _>(
             client_key.as_ref(),
@@ -172,16 +170,19 @@ mod test {
     #[test]
     #[cfg(feature = "long_running_tests")]
     fn test_full() {
+        use crate::logger;
+        use tracing::metadata::LevelFilter;
+
         logger::test_init(LevelFilter::INFO);
 
-        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_LVL_90.clone();
+        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_SQRD_LVL_128.clone();
 
         test_helper::test_full::<ShortintWoppbs1BitSboxPbsAesEncrypt, _>(client_key.as_ref(), &ctx);
     }
 
     #[test]
     fn test_light_gal_mul() {
-        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_LVL_45.clone();
+        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_SQRD_LVL_64.clone();
 
         test_helper::test_light::<ShortintWoppbs1BitSboxGalMulPbsAesEncrypt, _>(
             client_key.as_ref(),
@@ -192,9 +193,12 @@ mod test {
     #[test]
     #[cfg(feature = "long_running_tests")]
     fn test_full_gal_nul() {
+        use crate::logger;
+        use tracing::metadata::LevelFilter;
+
         logger::test_init(LevelFilter::INFO);
 
-        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_LVL_45.clone();
+        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_SQRD_LVL_64.clone();
 
         test_helper::test_full::<ShortintWoppbs1BitSboxGalMulPbsAesEncrypt, _>(
             client_key.as_ref(),

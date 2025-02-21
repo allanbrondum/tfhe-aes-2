@@ -1,15 +1,15 @@
 use std::time::Instant;
 
 use crate::aes_128;
-use crate::aes_128::fhe::data_model::{Block, Byte, Word};
+use crate::aes_128::fhe::data_model::{Block, Word};
 use crate::aes_128::fhe::{fhe_encryption, Aes128Encrypt};
-use crate::aes_128::{aes_lib, plain, ROUNDS};
 use crate::tfhe::{ClientKeyT, ContextT};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
 
+#[cfg(feature = "long_running_tests")]
 pub fn test_full<Enc: Aes128Encrypt, CK>(client_key: &CK, ctx: &Enc::Ctx)
 where
     CK: ClientKeyT<Bit = <Enc::Ctx as ContextT>::Bit>,
@@ -19,6 +19,7 @@ where
 }
 
 /// Full test against `aes` Rust library
+#[cfg(feature = "long_running_tests")]
 pub fn test_key_expansion_and_block_encryption_vs_aes<Enc: Aes128Encrypt, CK>(
     client_key: &CK,
     ctx: &Enc::Ctx,
@@ -39,16 +40,17 @@ pub fn test_key_expansion_and_block_encryption_vs_aes<Enc: Aes128Encrypt, CK>(
     let blocks = fhe_encryption::encrypt_blocks(client_key, blocks_clear);
 
     let key_schedule = expand_key::<Enc>(ctx, key);
-    let encrypted = encrypt_blocks::<Enc>(ctx, key_schedule, blocks, ROUNDS);
+    let encrypted = encrypt_blocks::<Enc>(ctx, key_schedule, blocks, aes_128::ROUNDS);
     let encrypted_clear = fhe_encryption::decrypt_blocks(client_key, &encrypted);
 
     assert_eq!(
         encrypted_clear,
-        aes_lib::encrypt_blocks(key_clear, blocks_clear)
+        aes_128::aes_lib::encrypt_blocks(key_clear, blocks_clear)
     );
 }
 
 /// Full test against test vector in FIPS 197 appendix C.1
+#[cfg(feature = "long_running_tests")]
 pub fn test_key_expansion_and_block_encryption_fips_197<Enc: Aes128Encrypt, CK>(
     client_key: &CK,
     ctx: &Enc::Ctx,
@@ -69,7 +71,7 @@ pub fn test_key_expansion_and_block_encryption_fips_197<Enc: Aes128Encrypt, CK>(
     let blocks = fhe_encryption::encrypt_blocks(client_key, blocks_clear);
 
     let key_schedule = expand_key::<Enc>(ctx, key);
-    let encrypted = encrypt_blocks::<Enc>(ctx, key_schedule, blocks, ROUNDS);
+    let encrypted = encrypt_blocks::<Enc>(ctx, key_schedule, blocks, aes_128::ROUNDS);
     let encrypted_clear = fhe_encryption::decrypt_blocks(client_key, &encrypted);
 
     let expected_encrypted_clear: aes_128::Block = hex::decode("69c4e0d86a7b0430d8cdb78070b4c55a")
@@ -103,7 +105,7 @@ pub fn test_block_encryption_vs_plain<Enc: Aes128Encrypt, CK>(
     rng.fill(&mut block1_clear);
     let blocks_clear = &[block1_clear];
 
-    let key_schedule_clear = plain::key_schedule(&key_clear);
+    let key_schedule_clear = aes_128::plain::key_schedule(&key_clear);
     let key_schedule = fhe_encryption::encrypt_word_array(client_key, &key_schedule_clear);
     let blocks = fhe_encryption::encrypt_blocks(client_key, blocks_clear);
 
@@ -112,13 +114,14 @@ pub fn test_block_encryption_vs_plain<Enc: Aes128Encrypt, CK>(
 
     assert_eq!(
         encrypted_clear,
-        plain::expand_key_and_encrypt_blocks(key_clear, blocks_clear, rounds)
+        aes_128::plain::expand_key_and_encrypt_blocks(key_clear, blocks_clear, rounds)
     );
 }
 
+#[cfg(feature = "long_running_tests")]
 fn expand_key<Enc: Aes128Encrypt>(
     ctx: &Enc::Ctx,
-    key: [Byte<<Enc::Ctx as ContextT>::Bit>; 16],
+    key: [aes_128::fhe::data_model::Byte<<Enc::Ctx as ContextT>::Bit>; 16],
 ) -> [Word<<Enc::Ctx as ContextT>::Bit>; 44] {
     // Server side (optional): AES encrypt blocks
     let start = Instant::now();
