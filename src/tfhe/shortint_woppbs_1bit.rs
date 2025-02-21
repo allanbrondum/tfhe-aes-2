@@ -4,9 +4,11 @@ mod parameters;
 
 use crate::tfhe::{ClientKeyT, ContextT};
 
+use hashbrown::HashSet;
 use rayon::iter::IntoParallelRefIterator;
 use std::fmt::{Debug, Formatter};
 use std::ops::{BitXor, BitXorAssign};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tfhe::core_crypto::prelude::*;
@@ -18,17 +20,61 @@ use crate::tfhe::shortint_woppbs_1bit::parameters::Shortint1bitWopbsParameters;
 use crate::util;
 use rayon::iter::ParallelIterator;
 use tfhe::shortint::wopbs::{WopbsKey, WopbsLUTBase};
-use tfhe::shortint::{CarryModulus, MessageModulus};
+use tfhe::shortint::{CarryModulus, MaxNoiseLevel, MessageModulus};
 use tracing::debug;
 
 /// Ciphertext representing a single bit and encrypted for use in circuit bootstrapping. Encrypted under GLWE key
 #[derive(Clone)]
 pub struct BitCt {
     ct: LweCiphertextOwned<u64>,
+    noise_level: NoiseLevelWithComponents,
+    pub context: FheContext,
+}
+
+#[derive(Clone, Debug)]
+pub struct NoiseLevelWithComponents {
     /// Squared noise level (compared to how noise level is used in `shortint` module).
     /// It measures the error/noise variance relative to the "nominal" level (1).
     noise_level_squared: NoiseLevel,
-    pub context: FheContext,
+    /// "Ids" of ciphertexts that this one is composed/calculated from. Used to track
+    /// if noise/error is independent between ciphertexts
+    components: HashSet<CiphertextId>,
+}
+
+/// Unique id if each non-trivial ciphertext
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+struct CiphertextId(u64);
+
+impl NoiseLevelWithComponents {
+    fn with_noise_level(noise_level_squared: NoiseLevel, id: CiphertextId) -> Self {
+        Self {
+            noise_level_squared,
+            components: [id].into(),
+        }
+    }
+
+    fn trivial() -> Self {
+        Self {
+            noise_level_squared: NoiseLevel::ZERO,
+            components: Default::default(),
+        }
+    }
+
+    fn add_assign(&mut self, rhs: &Self, max_noise_level_squared: MaxNoiseLevel) {
+        assert!(
+            self.components
+                .intersection(&rhs.components)
+                .next()
+                .is_none(),
+            "noise components not independent"
+        );
+        self.components.extend(&rhs.components);
+
+        self.noise_level_squared += rhs.noise_level_squared;
+        max_noise_level_squared
+            .validate(self.noise_level_squared)
+            .unwrap();
+    }
 }
 
 impl Debug for BitCt {
@@ -49,12 +95,15 @@ impl BitCt {
     ) -> Self {
         Self {
             ct,
-            noise_level_squared,
+            noise_level: NoiseLevelWithComponents::with_noise_level(
+                noise_level_squared,
+                context.next_ct_id(),
+            ),
             context,
         }
     }
 
-    fn trivial(bit: Cleartext<u64>, context: FheContext) -> Self {
+    pub fn trivial(bit: Cleartext<u64>, context: FheContext) -> Self {
         let ct = lwe_encryption::allocate_and_trivially_encrypt_new_lwe_ciphertext(
             context
                 .server_key
@@ -65,17 +114,11 @@ impl BitCt {
             CiphertextModulus::new_native(),
         );
 
-        Self::with_noise_level(ct, NoiseLevel::ZERO, context)
-    }
-
-    fn set_noise_level(&mut self, noise_level_squared: NoiseLevel) {
-        self.context
-            .parameters
-            .max_noise_level_squared
-            .validate(noise_level_squared)
-            .unwrap();
-
-        self.noise_level_squared = noise_level_squared;
+        Self {
+            ct,
+            noise_level: NoiseLevelWithComponents::trivial(),
+            context,
+        }
     }
 }
 
@@ -91,9 +134,10 @@ pub fn decode_bit(encoding: Plaintext<u64>) -> Cleartext<u64> {
 impl BitXorAssign<&BitCt> for BitCt {
     fn bitxor_assign(&mut self, rhs: &Self) {
         lwe_linear_algebra::lwe_ciphertext_add_assign(&mut self.ct, &rhs.ct);
-        #[allow(clippy::suspicious_op_assign_impl)]
-        self.set_noise_level(self.noise_level_squared + rhs.noise_level_squared);
-        // todo check independent
+        self.noise_level.add_assign(
+            &rhs.noise_level,
+            self.context.parameters.max_noise_level_squared,
+        );
     }
 }
 
@@ -123,6 +167,15 @@ pub struct FheContext {
     server_key: Arc<shortint::server_key::ServerKey>,
     wopbs_key: Arc<shortint::wopbs::WopbsKey>,
     parameters: Shortint1bitWopbsParameters,
+    /// Counter for issuing ids to ciphertexts with noise (non-trivial ciphertexts)
+    ct_counter: Arc<AtomicU64>,
+}
+
+impl FheContext {
+    fn next_ct_id(&self) -> CiphertextId {
+        let ct_id = self.ct_counter.fetch_add(1, Ordering::SeqCst);
+        CiphertextId(ct_id)
+    }
 }
 
 impl ContextT for FheContext {
@@ -206,6 +259,7 @@ impl FheContext {
             server_key: server_key.into(),
             wopbs_key: wops_key.into(),
             parameters,
+            ct_counter: Default::default(),
         };
 
         let (glwe_secret_key, lwe_secret_key, _parameters) =
@@ -277,12 +331,12 @@ impl FheContext {
         // acts as a multiplier on the error variance. Hence, we multiply the (squared) nominal noise level with
         // the number of input bits. Notice that the "selector" TRGSW ciphertexts have independent noise since they are
         // independent boolean bootstraps of the input bits (happens in circuit_bootstrapping_vertical_packing).
-        let output_noise_level = NoiseLevel::NOMINAL * input_bit_count as u64;
+        let output_noise_level_squared = NoiseLevel::NOMINAL * input_bit_count as u64;
         let bit_cts: Vec<_> = self
             .wopbs_key
             .circuit_bootstrapping_vertical_packing(lut, &dual_bits_list_ct)
             .into_iter()
-            .map(|lwe_ct| BitCt::with_noise_level(lwe_ct, output_noise_level, self.clone()))
+            .map(|lwe_ct| BitCt::with_noise_level(lwe_ct, output_noise_level_squared, self.clone()))
             .collect();
 
         debug!("multivalued circuit bootstrap {:?}", start.elapsed());
@@ -298,7 +352,7 @@ impl FheContext {
             DeltaLog(63),
             &wrap_in_shortint(
                 ct.ct.clone(),
-                NoiseLevel::NOMINAL * ((ct.noise_level_squared.get() - 1).isqrt() + 1),
+                NoiseLevel::NOMINAL * ((ct.noise_level.noise_level_squared.get() - 1).isqrt() + 1),
             ),
             ExtractedBitsCount(1),
         );
@@ -383,6 +437,12 @@ pub mod test {
     pub static KEYS_SQRD_LVL_1: LazyLock<(Arc<ClientKey>, FheContext)> =
         LazyLock::new(|| keys_impl(parameters::params_sqrd_lvl_1()));
 
+    pub static KEYS_SQRD_LVL_2: LazyLock<(Arc<ClientKey>, FheContext)> =
+        LazyLock::new(|| keys_impl(parameters::params_sqrd_lvl_2()));
+
+    pub static KEYS_SQRD_LVL_4: LazyLock<(Arc<ClientKey>, FheContext)> =
+        LazyLock::new(|| keys_impl(parameters::params_sqrd_lvl_4()));
+
     pub static KEYS_SQRD_LVL_32: LazyLock<(Arc<ClientKey>, FheContext)> =
         LazyLock::new(|| keys_impl(parameters::params_sqrd_lvl_32()));
 
@@ -414,8 +474,8 @@ pub mod test {
     }
 
     #[test]
-    fn test_bit() {
-        let (client_key, context) = KEYS_SQRD_LVL_32.clone();
+    fn test_bit_encrypt_decrypt() {
+        let (client_key, context) = KEYS_SQRD_LVL_1.clone();
 
         let b1 = client_key.encrypt(Cleartext(0));
         let b2 = client_key.encrypt(Cleartext(1));
@@ -423,15 +483,7 @@ pub mod test {
         assert_eq!(client_key.decrypt(&b1), Cleartext(0));
         assert_eq!(client_key.decrypt(&b2), Cleartext(1));
 
-        assert_eq!(client_key.decrypt(&(b1.clone() ^ b2.clone())), Cleartext(1));
-        assert_eq!(client_key.decrypt(&(b1.clone() ^ b1.clone())), Cleartext(0));
-        assert_eq!(client_key.decrypt(&(b2.clone() ^ b2.clone())), Cleartext(0));
-
-        // default/trivial
-        assert_eq!(
-            client_key.decrypt(&(b2.clone() ^ BitCt::trivial(Cleartext(0), context.clone()))),
-            Cleartext(1)
-        );
+        // decrypt trivial
         assert_eq!(
             client_key.decrypt(&BitCt::trivial(Cleartext(0), context.clone())),
             Cleartext(0)
@@ -440,6 +492,51 @@ pub mod test {
             client_key.decrypt(&BitCt::trivial(Cleartext(1), context.clone())),
             Cleartext(1)
         );
+    }
+
+    #[test]
+    fn test_bit_xor() {
+        let (client_key, context) = KEYS_SQRD_LVL_2.clone();
+
+        let b1 = client_key.encrypt(Cleartext(0));
+        let b2 = client_key.encrypt(Cleartext(1));
+        let b3 = client_key.encrypt(Cleartext(0));
+        let b4 = client_key.encrypt(Cleartext(1));
+
+        // xor
+        assert_eq!(client_key.decrypt(&(b1.clone() ^ b2.clone())), Cleartext(1));
+        assert_eq!(client_key.decrypt(&(b1.clone() ^ b3.clone())), Cleartext(0));
+        assert_eq!(client_key.decrypt(&(b2.clone() ^ b4.clone())), Cleartext(0));
+
+        // trivial
+        let t0 = BitCt::trivial(Cleartext(0), context.clone());
+        assert_eq!(client_key.decrypt(&(b2.clone() ^ t0.clone())), Cleartext(1));
+        // trivial does not accumulate noise
+        let _ = t0.clone() ^ t0.clone() ^ t0.clone();
+    }
+
+    #[test]
+    #[should_panic(expected = "NoiseTooBig")]
+    fn test_bit_xor_above_max_noise() {
+        let (client_key, _context) = KEYS_SQRD_LVL_2.clone();
+
+        let b1 = client_key.encrypt(Cleartext(0));
+        let b2 = client_key.encrypt(Cleartext(1));
+        let b3 = client_key.encrypt(Cleartext(0));
+
+        // noise accumulation
+        let _ = b1.clone() ^ b2.clone() ^ b3.clone();
+    }
+
+    #[test]
+    #[should_panic(expected = "noise components not independent")]
+    fn test_bit_xor_not_independent() {
+        let (client_key, _context) = KEYS_SQRD_LVL_2.clone();
+
+        let b1 = client_key.encrypt(Cleartext(0));
+
+        // ciphertexts with dependent noise
+        let _ = b1.clone() ^ b1.clone();
     }
 
     #[test]
@@ -538,7 +635,7 @@ pub mod test {
     }
 
     #[test]
-    fn test_xor_8bit() {
+    fn test_multivariate_multivalues_xor_8bit() {
         logger::test_init(LevelFilter::DEBUG);
 
         let (client_key, context) = KEYS_SQRD_LVL_1.clone();

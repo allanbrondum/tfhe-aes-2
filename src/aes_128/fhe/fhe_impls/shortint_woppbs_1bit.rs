@@ -192,7 +192,7 @@ mod test {
 
     #[test]
     #[cfg(feature = "long_running_tests")]
-    fn test_full_gal_nul() {
+    fn test_full_gal_mul() {
         use crate::logger;
         use tracing::metadata::LevelFilter;
 

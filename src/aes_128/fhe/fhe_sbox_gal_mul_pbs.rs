@@ -140,7 +140,6 @@ where
     Byte<Ctx::Bit>: ByteT,
 {
     let mut expanded_key: [Word<Ctx::Bit>; 44] = array::from_fn(|_| Word::zero(ctx));
-
     for i in 0..4 {
         for j in 0..4 {
             expanded_key[i][j] = key_slice[i * 4 + j].clone();

@@ -71,6 +71,104 @@ pub fn params_sqrd_lvl_1() -> Shortint1bitWopbsParameters {
 /// - 1: # bits
 /// -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b, cb_l,cb_b, pp_l,pp_b,  cost, p_error
 /// ...
+/// - 1 :   2, 10,  679,    2, 15,     4,  3,     1, 11,     2, 16,    136, 4.1e-20
+/// ...
+/// ```
+#[cfg(test)]
+pub fn params_sqrd_lvl_2() -> Shortint1bitWopbsParameters {
+    let inner = WopbsParameters {
+        lwe_dimension: LweDimension(679),
+        glwe_dimension: GlweDimension(2),
+        polynomial_size: PolynomialSize(1024),
+        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            6.676348397087967e-5,
+        )),
+        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            0.00000000000000022148688116005568,
+        )),
+        pbs_level: DecompositionLevelCount(2),
+        pbs_base_log: DecompositionBaseLog(15),
+        ks_level: DecompositionLevelCount(4),
+        ks_base_log: DecompositionBaseLog(3),
+        cbs_level: DecompositionLevelCount(1),
+        cbs_base_log: DecompositionBaseLog(11),
+        pfks_level: DecompositionLevelCount(2),
+        pfks_base_log: DecompositionBaseLog(16),
+        pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            0.00000000000000022148688116005568,
+        )),
+        message_modulus: MessageModulus(2),
+        carry_modulus: CarryModulus(1),
+        ciphertext_modulus: CiphertextModulus::new_native(),
+        encryption_key_choice: EncryptionKeyChoice::Big,
+    };
+
+    Shortint1bitWopbsParameters {
+        inner,
+        max_noise_level_squared: MaxNoiseLevel::new(2),
+    }
+}
+
+/// Parameters created from
+///
+/// ```text
+/// ./optimizer  --min-precision 1 --max-precision 1 --p-error 5.42101086e-20 --ciphertext-modulus-log 64 --wop-pbs
+/// security level: 128
+/// target p_error: 5.4e-20
+/// per precision and log norm2:
+///
+/// - 1: # bits
+/// -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b, cb_l,cb_b, pp_l,pp_b,  cost, p_error
+/// ...
+/// - 2 :   2, 10,  656,    3, 12,     4,  3,     1, 13,     2, 16,    160, 3.6e-20
+/// ...
+/// ```
+#[cfg(test)]
+pub fn params_sqrd_lvl_4() -> Shortint1bitWopbsParameters {
+    let inner = WopbsParameters {
+        lwe_dimension: LweDimension(656),
+        glwe_dimension: GlweDimension(2),
+        polynomial_size: PolynomialSize(1024),
+        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            0.00003604499526942373,
+        )),
+        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            0.00000000000000022148688116005568,
+        )),
+        pbs_level: DecompositionLevelCount(3),
+        pbs_base_log: DecompositionBaseLog(12),
+        ks_level: DecompositionLevelCount(4),
+        ks_base_log: DecompositionBaseLog(3),
+        cbs_level: DecompositionLevelCount(1),
+        cbs_base_log: DecompositionBaseLog(13),
+        pfks_level: DecompositionLevelCount(2),
+        pfks_base_log: DecompositionBaseLog(16),
+        pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            0.00000000000000022148688116005568,
+        )),
+        message_modulus: MessageModulus(2),
+        carry_modulus: CarryModulus(1),
+        ciphertext_modulus: CiphertextModulus::new_native(),
+        encryption_key_choice: EncryptionKeyChoice::Big,
+    };
+
+    Shortint1bitWopbsParameters {
+        inner,
+        max_noise_level_squared: MaxNoiseLevel::new(4),
+    }
+}
+
+/// Parameters created from
+///
+/// ```text
+/// ./optimizer  --min-precision 1 --max-precision 1 --p-error 5.42101086e-20 --ciphertext-modulus-log 64 --wop-pbs
+/// security level: 128
+/// target p_error: 5.4e-20
+/// per precision and log norm2:
+///
+/// - 1: # bits
+/// -ln2:   k,  N,    n, br_l,br_b, ks_l,ks_b, cb_l,cb_b, pp_l,pp_b,  cost, p_error
+/// ...
 /// - 5 :   2, 10,  649,    6,  7,     6,  2,     1, 15,     3, 12,    268, 4.8e-20
 /// ...
 /// ```

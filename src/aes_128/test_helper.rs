@@ -40,6 +40,7 @@ pub fn test_key_expansion_and_block_encryption_vs_aes<Enc: Aes128Encrypt, CK>(
     let blocks = fhe_encryption::encrypt_blocks(client_key, blocks_clear);
 
     let key_schedule = expand_key::<Enc>(ctx, key);
+
     let encrypted = encrypt_blocks::<Enc>(ctx, key_schedule, blocks, aes_128::ROUNDS);
     let encrypted_clear = fhe_encryption::decrypt_blocks(client_key, &encrypted);
 
