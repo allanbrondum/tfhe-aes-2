@@ -39,25 +39,47 @@ implemented by adding ciphertexts and letting them overflow.
 
 ### `shorint_woppbs_1bit`
 
-This model uses vertical packed circuit bootstrapping introduced in <https://eprint.iacr.org/2017/430.pdf> and implemented
-in the WoP-PBS experimental features in `tfhe-rs`. Each shortint ciphertext represents 1 bit. 
-Additional primitives are implemented in the library at hand to support
-multivariate and multivalued functions, but these higher level primitives still builds on the low-level primitives in `tfhe-rs`.
+For programmatic bootstrapping, this model uses bit extraction and circuit bootstrapping combined with vertical 
+packed (CMux tree) lookup table introduced in <https://eprint.iacr.org/2017/430.pdf> and implemented
+in the WoP-PBS experimental features in `tfhe-rs`. Each ciphertext represents 1 bit. XOR is implemented as leveled
+operations by adding ciphertexts. Two additional mid-level primitives are introduced:
+
+1) noise propagation that assumes independent noise when adding ciphertexts (XOR)  
+2) lookup tables for multivariate and multivalued functions
+
+The noise propagation when adding ciphertexts in the `tfhe-rs` `shortint` modules, does not make any assumption
+of independent noise in the addends. There is a `max_noise_level` that is the L2 norm of the dot product of the atomic
+pattern (<https://github.com/zama-ai/concrete/blob/main/compilers/concrete-optimizer/v0-parameters/README.md>). And the
+`noise_level` on ciphertexts is the standard deviation of the ciphertext phase error relative to the "nominal"
+noise. When adding to ciphertexts, the noise is propagated as the sum of the two `noise_level`. This assumes no independence
+of noise and relies on the general relation for random variables: `stddev(X + Y) <= stddev(X) + stddev(Y)`. The additional
+primitive introduced is the use the square of the L2 norm of the dot product instead: `max_noise_level_squared`. The
+`noise_level_squared` on each ciphertext is the variance of the ciphertext phase error relative to the "nominal" noise level.
+By assuming that the ciphertexts we add have independent noise, we can calculate the propagated noise 
+by adding the two `noise_level_squared` when adding the ciphertexts. This is due to the relation `var(X + Y) = var(X) + var(Y)` for
+independent random variables. It can also be seen as a dot product with weights (1, 1) of independent ciphertexts - the 
+squared L2 norm of this dot product is 2.
+The independence assumption is additionally checked in the code by keeping track of all "fresh" ciphertexts.
+
+To support multivariate and multivalued programmatic bootstrapping, additional primitives are implemented in the library at hand
+to generate the lookup table, but evaluating the CMux tree still relies on the existing low-level primitives in `tfhe-rs`. In order to account for the additional
+noise due to the multivariate input, the nominal (squared) noise level is multiplied with the number of input bits (which is 8 for the SBOX) - 
+see the phase error variance bound in Lemma 3.2 in https://eprint.iacr.org/2017/430.pdf.
 
 As a comment, the effectiveness if this model can be improved by running the boolean bootstrapping of GGSW ciphertexts in
 `fft64::crypto::wop_pbs::circuit_bootstrap_boolean` in parallel. 
 
 ### `shorint_woppbs_8bit`
 
-This model is similar to the 1bit model, but uses an 8-bit ciphertext space for circuit bootstrapping 
+This model is similar to the 1bit model, but uses an 8-bit ciphertext space for circuit bootstrapping and lookup table.
 (SBOX can then be evaluated on single ciphertexts). XOR is still performed on the 1-bit "dual" ciphertexts that are
 extracted from the 8-bit ciphertexts. This model though seems outperformed by the multivariate, multivalued 1-bit ciphertext
 bootstrapping in `shorint_woppbs_1bit`
 
 ### `shorint_1bit`
 
-Build on "plain" `tfhe-rs` shortint. And additional primitive is introduced to do multivariate (8-bit for SBOX)
-bootstrapping. The primitive is a tree based bootstrap as described in
+Build on "plain" `tfhe-rs` shortint. An additional primitive is introduced to do multivariate (8-bit for SBOX)
+programmatic bootstrapping. The primitive is a tree based bootstrap as described in
 <https://tches.iacr.org/index.php/TCHES/article/view/8793/8393>. During implementation, the noise aggregation seemed
 hard to control though. And for the model to be effective, it would need further primitives in form of multivalued
 bootstrapping via factoring test vectors as described in <https://eprint.iacr.org/2018/622.pdf>.

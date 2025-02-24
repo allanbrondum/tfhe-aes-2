@@ -70,6 +70,7 @@ impl NoiseLevelWithComponents {
         );
         self.components.extend(&rhs.components);
 
+        // error variances can be added since noise in addends are independent
         self.noise_level_squared += rhs.noise_level_squared;
         max_noise_level_squared
             .validate(self.noise_level_squared)
@@ -277,7 +278,7 @@ impl FheContext {
 
     /// Generate lookup table for the given function considering the given number of bits of input and
     /// output (the least significant bits) in the given function. When the returned LUT is used with [`Self::circuit_bootstrap`], the same number of input
-    /// bits should be given, and the number of "dual" ciphertexts returned is the same as the number of output bits
+    /// bit ciphertexts should be given, and the number of bit ciphertexts returned is the same as the number of output bits
     /// specified in the LUT.
     pub fn generate_lookup_table(
         &self,
