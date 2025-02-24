@@ -32,10 +32,10 @@ pub fn params_sqrd_lvl_1() -> Shortint1bitWopbsParameters {
         glwe_dimension: GlweDimension(2),
         polynomial_size: PolynomialSize(1024),
         lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            6.676348397087967e-5,
+            4.7280002450549286e-05,
         )),
         glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568,
+            3.162026630747649e-16,
         )),
         pbs_level: DecompositionLevelCount(2),
         pbs_base_log: DecompositionBaseLog(15),
@@ -46,7 +46,7 @@ pub fn params_sqrd_lvl_1() -> Shortint1bitWopbsParameters {
         pfks_level: DecompositionLevelCount(1),
         pfks_base_log: DecompositionBaseLog(24),
         pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568,
+            3.162026630747649e-16,
         )),
         message_modulus: MessageModulus(2),
         carry_modulus: CarryModulus(1),
@@ -80,10 +80,10 @@ pub fn params_sqrd_lvl_4() -> Shortint1bitWopbsParameters {
         glwe_dimension: GlweDimension(2),
         polynomial_size: PolynomialSize(1024),
         lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            6.676348397087967e-5,
+            4.7280002450549286e-05,
         )),
         glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568,
+            3.162026630747649e-16,
         )),
         pbs_level: DecompositionLevelCount(2),
         pbs_base_log: DecompositionBaseLog(15),
@@ -94,7 +94,7 @@ pub fn params_sqrd_lvl_4() -> Shortint1bitWopbsParameters {
         pfks_level: DecompositionLevelCount(2),
         pfks_base_log: DecompositionBaseLog(16),
         pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568,
+            3.162026630747649e-16,
         )),
         message_modulus: MessageModulus(2),
         carry_modulus: CarryModulus(1),
@@ -128,7 +128,7 @@ pub fn params_sqrd_lvl_64() -> Shortint1bitWopbsParameters {
         glwe_dimension: GlweDimension(4),
         polynomial_size: PolynomialSize(512),
         lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            6.27510880527384e-05,
+            4.7280002450549286e-05,
         )),
         glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
             0.00000000000000022148688116005568,
@@ -176,10 +176,10 @@ pub fn params_sqrd_lvl_256() -> Shortint1bitWopbsParameters {
         glwe_dimension: GlweDimension(2),
         polynomial_size: PolynomialSize(1024),
         lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            6.27510880527384e-05,
+            4.7280002450549286e-05,
         )),
         glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568,
+            3.162026630747649e-16,
         )),
         pbs_level: DecompositionLevelCount(4),
         pbs_base_log: DecompositionBaseLog(9),
@@ -190,7 +190,7 @@ pub fn params_sqrd_lvl_256() -> Shortint1bitWopbsParameters {
         pfks_level: DecompositionLevelCount(3),
         pfks_base_log: DecompositionBaseLog(12),
         pfks_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            0.00000000000000022148688116005568,
+            3.162026630747649e-16,
         )),
         message_modulus: MessageModulus(2),
         carry_modulus: CarryModulus(1),
