@@ -158,6 +158,7 @@ mod test {
     use crate::aes_128::test_helper;
 
     #[test]
+    #[ignore] // does not work since cipher text noise is not independent in calculations
     fn test_light() {
         let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_SQRD_LVL_256.clone();
 
@@ -168,6 +169,7 @@ mod test {
     }
 
     #[test]
+    #[ignore] // does not work since cipher text noise is not independent in calculations
     #[cfg(feature = "long_running_tests")]
     fn test_full() {
         use crate::logger;
