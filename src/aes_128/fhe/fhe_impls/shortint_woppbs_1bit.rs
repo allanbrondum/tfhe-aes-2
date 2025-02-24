@@ -159,7 +159,7 @@ mod test {
 
     #[test]
     fn test_light() {
-        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_SQRD_LVL_128.clone();
+        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_SQRD_LVL_256.clone();
 
         test_helper::test_light::<ShortintWoppbs1BitSboxPbsAesEncrypt, _>(
             client_key.as_ref(),
@@ -175,7 +175,7 @@ mod test {
 
         logger::test_init(LevelFilter::INFO);
 
-        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_SQRD_LVL_128.clone();
+        let (client_key, ctx) = crate::tfhe::shortint_woppbs_1bit::test::KEYS_SQRD_LVL_256.clone();
 
         test_helper::test_full::<ShortintWoppbs1BitSboxPbsAesEncrypt, _>(client_key.as_ref(), &ctx);
     }

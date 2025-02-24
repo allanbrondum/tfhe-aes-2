@@ -231,24 +231,16 @@ impl FheContext {
         Self::generate_keys_with_params(parameters::params_sqrd_lvl_1())
     }
 
-    pub fn generate_keys_sqrd_lvl_32() -> (ClientKey, Self) {
-        Self::generate_keys_with_params(parameters::params_sqrd_lvl_32())
+    pub fn generate_keys_sqrd_lvl_4() -> (ClientKey, Self) {
+        Self::generate_keys_with_params(parameters::params_sqrd_lvl_4())
     }
 
     pub fn generate_keys_sqrd_lvl_64() -> (ClientKey, Self) {
         Self::generate_keys_with_params(parameters::params_sqrd_lvl_64())
     }
 
-    pub fn generate_keys_sqrd_lvl_128() -> (ClientKey, Self) {
-        Self::generate_keys_with_params(parameters::params_sqrd_lvl_128())
-    }
-
     pub fn generate_keys_sqrd_lvl_256() -> (ClientKey, Self) {
         Self::generate_keys_with_params(parameters::params_sqrd_lvl_256())
-    }
-
-    pub fn generate_keys_sqrd_lvl_2048() -> (ClientKey, Self) {
-        Self::generate_keys_with_params(parameters::params_sqrd_lvl_2048())
     }
 
     fn generate_keys_with_params(parameters: Shortint1bitWopbsParameters) -> (ClientKey, Self) {
@@ -438,20 +430,14 @@ pub mod test {
     pub static KEYS_SQRD_LVL_1: LazyLock<(Arc<ClientKey>, FheContext)> =
         LazyLock::new(|| keys_impl(parameters::params_sqrd_lvl_1()));
 
-    pub static KEYS_SQRD_LVL_2: LazyLock<(Arc<ClientKey>, FheContext)> =
-        LazyLock::new(|| keys_impl(parameters::params_sqrd_lvl_2()));
-
     pub static KEYS_SQRD_LVL_4: LazyLock<(Arc<ClientKey>, FheContext)> =
         LazyLock::new(|| keys_impl(parameters::params_sqrd_lvl_4()));
-
-    pub static KEYS_SQRD_LVL_32: LazyLock<(Arc<ClientKey>, FheContext)> =
-        LazyLock::new(|| keys_impl(parameters::params_sqrd_lvl_32()));
 
     pub static KEYS_SQRD_LVL_64: LazyLock<(Arc<ClientKey>, FheContext)> =
         LazyLock::new(|| keys_impl(parameters::params_sqrd_lvl_64()));
 
-    pub static KEYS_SQRD_LVL_128: LazyLock<(Arc<ClientKey>, FheContext)> =
-        LazyLock::new(|| keys_impl(parameters::params_sqrd_lvl_128()));
+    pub static KEYS_SQRD_LVL_256: LazyLock<(Arc<ClientKey>, FheContext)> =
+        LazyLock::new(|| keys_impl(parameters::params_sqrd_lvl_256()));
 
     fn keys_impl(params: Shortint1bitWopbsParameters) -> (Arc<ClientKey>, FheContext) {
         let (client_key, context) = FheContext::generate_keys_with_params(params);
@@ -497,7 +483,7 @@ pub mod test {
 
     #[test]
     fn test_bit_xor() {
-        let (client_key, context) = KEYS_SQRD_LVL_2.clone();
+        let (client_key, context) = KEYS_SQRD_LVL_4.clone();
 
         let b1 = client_key.encrypt(Cleartext(0));
         let b2 = client_key.encrypt(Cleartext(1));
@@ -519,20 +505,22 @@ pub mod test {
     #[test]
     #[should_panic(expected = "NoiseTooBig")]
     fn test_bit_xor_above_max_noise() {
-        let (client_key, _context) = KEYS_SQRD_LVL_2.clone();
+        let (client_key, _context) = KEYS_SQRD_LVL_4.clone();
 
         let b1 = client_key.encrypt(Cleartext(0));
         let b2 = client_key.encrypt(Cleartext(1));
         let b3 = client_key.encrypt(Cleartext(0));
+        let b4 = client_key.encrypt(Cleartext(1));
+        let b5 = client_key.encrypt(Cleartext(0));
 
         // noise accumulation
-        let _ = b1.clone() ^ b2.clone() ^ b3.clone();
+        let _ = b1.clone() ^ b2.clone() ^ b3.clone() ^ b4.clone() ^ b5.clone();
     }
 
     #[test]
     #[should_panic(expected = "noise components not independent")]
     fn test_bit_xor_not_independent() {
-        let (client_key, _context) = KEYS_SQRD_LVL_2.clone();
+        let (client_key, _context) = KEYS_SQRD_LVL_4.clone();
 
         let b1 = client_key.encrypt(Cleartext(0));
 
@@ -561,7 +549,7 @@ pub mod test {
     }
 
     fn test_multivariate_parity_fn_impl(bits: usize, word: u16) {
-        let (client_key, context) = KEYS_SQRD_LVL_32.clone();
+        let (client_key, context) = KEYS_SQRD_LVL_64.clone();
 
         let parity_fn =
             |val: u16| -> u64 { (util::u16_to_bits(val).iter().sum::<u8>() % 2) as u64 };
@@ -604,7 +592,7 @@ pub mod test {
     }
 
     fn test_multivariate_multivalued_square_fn_impl(bits: usize, byte: u16) {
-        let (client_key, context) = KEYS_SQRD_LVL_32.clone();
+        let (client_key, context) = KEYS_SQRD_LVL_64.clone();
 
         let square_fn = |val: u16| -> u64 { (val * val % (1 << bits)) as u64 };
 
