@@ -55,11 +55,10 @@ noise. When adding to ciphertexts, the noise is propagated as the sum of the two
 of noise and relies on the general relation for random variables: `stddev(X + Y) <= stddev(X) + stddev(Y)`. The additional
 primitive introduced is the use the square of the L2 norm of the dot product instead: `max_noise_level_squared`. The
 `noise_level_squared` on each ciphertext is the variance of the ciphertext phase error relative to the "nominal" noise level.
-By assuming that the ciphertexts we add have independent noise, we can calculate the propagated noise 
+By applying the "independence heuristic" and assuming that the ciphertexts we add have independent noise, we can calculate the propagated noise 
 by adding the two `noise_level_squared` when adding the ciphertexts. This is due to the relation `var(X + Y) = var(X) + var(Y)` for
 independent random variables. It can also be seen as a dot product with weights (1, 1) of independent ciphertexts - the 
 squared L2 norm of this dot product is 2.
-The independence assumption is additionally checked in the code by keeping track of all "fresh" ciphertexts.
 
 To support multivariate and multivalued programmatic bootstrapping, additional primitives are implemented in the library at hand
 to generate the lookup table, but evaluating the CMux tree still relies on the existing low-level primitives in `tfhe-rs`. In order to account for the additional

@@ -70,7 +70,6 @@ impl NoiseLevelWithComponents {
         );
         self.components.extend(&rhs.components);
 
-        // error variances can be added since noise in addends are independent
         self.noise_level_squared += rhs.noise_level_squared;
         max_noise_level_squared
             .validate(self.noise_level_squared)
@@ -322,8 +321,7 @@ impl FheContext {
 
         // In Lemma 3.2 in https://eprint.iacr.org/2017/430.pdf, the number of "selector"/"controller" input ciphertexts
         // acts as a multiplier on the error variance. Hence, we multiply the (squared) nominal noise level with
-        // the number of input bits. Notice that the "selector" TRGSW ciphertexts have independent noise since they are
-        // independent boolean bootstraps of the input bits (happens in circuit_bootstrapping_vertical_packing).
+        // the number of input bits.
         let output_noise_level_squared = NoiseLevel::NOMINAL * input_bit_count as u64;
         let bit_cts: Vec<_> = self
             .wopbs_key
@@ -694,5 +692,44 @@ pub mod test {
                 0, 1, 0, 1
             ])
         );
+    }
+
+    #[test]
+    fn test_noise_independence() {
+        let (client_key, context) = KEYS_SQRD_LVL_1.clone();
+
+        let b1 = client_key.encrypt(Cleartext(0));
+        let b2 = client_key.encrypt(Cleartext(0));
+
+        ciphertext_debug(&client_key, "b1", &b1);
+        ciphertext_debug(&client_key, "b1", &b1);
+        ciphertext_debug(&client_key, "b2", &b2);
+
+        let b1_boot1 = boot(&context, &b1);
+        let b1_boot2 = boot(&context, &b1);
+        let b2_boot1 = boot(&context, &b2);
+
+        ciphertext_debug(&client_key, "b1_boot1", &b1_boot1);
+        ciphertext_debug(&client_key, "b1_boot2", &b1_boot2);
+        ciphertext_debug(&client_key, "b2_boot1", &b2_boot1);
+    }
+
+    fn ciphertext_debug(client_key: &ClientKey, label: &str, bit: &BitCt) {
+        let encoding = lwe_encryption::decrypt_lwe_ciphertext(
+            &client_key.glwe_secret_key.as_lwe_secret_key(),
+            &bit.ct,
+        );
+        let noise = encoding.0 - encode_bit(decode_bit(encoding)).0;
+        println!("noise {}: {:064b}", label, noise);
+    }
+
+    fn boot(context: &FheContext, bit: &BitCt) -> BitCt {
+        let lut = context.generate_lookup_table(1, 1, |bit| bit as u64);
+
+        context
+            .circuit_bootstrap(&[bit], &lut)
+            .into_iter()
+            .next()
+            .expect("one bit")
     }
 }
