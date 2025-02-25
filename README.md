@@ -40,7 +40,7 @@ implemented by adding ciphertexts and letting them overflow.
 ### `shorint_woppbs_1bit`
 
 For programmatic bootstrapping, this model uses bit extraction and circuit bootstrapping combined with vertical 
-packed (CMux tree) lookup table introduced in <https://eprint.iacr.org/2017/430.pdf> and implemented
+packed (CMux tree) l<ookup table introduced in <https://eprint.iacr.org/2017/430.pdf> and implemented
 in the WoP-PBS experimental features in `tfhe-rs`. Each ciphertext represents 1 bit. XOR is implemented as leveled
 operations by adding ciphertexts. Two additional mid-level primitives are introduced:
 
@@ -49,13 +49,15 @@ operations by adding ciphertexts. Two additional mid-level primitives are introd
 
 The noise propagation when adding ciphertexts in the `tfhe-rs` `shortint` modules, does not make any assumption
 of independent noise in the addends. There is a `max_noise_level` that is the L2 norm of the dot product of the atomic
-pattern (<https://github.com/zama-ai/concrete/blob/main/compilers/concrete-optimizer/v0-parameters/README.md>). And the
-`noise_level` on ciphertexts is the standard deviation of the ciphertext phase error relative to the "nominal"
+pattern (see <https://github.com/zama-ai/concrete/blob/main/compilers/concrete-optimizer/v0-parameters/README.md> and 
+also https://eprint.iacr.org/2022/704.pdf for deeper reference). 
+And the `noise_level` on ciphertexts is the standard deviation of the ciphertext phase error relative to the "nominal"
 noise. When adding to ciphertexts, the noise is propagated as the sum of the two `noise_level`. This assumes no independence
 of noise and relies on the general relation for random variables: `stddev(X + Y) <= stddev(X) + stddev(Y)`. The additional
 primitive introduced is the use the square of the L2 norm of the dot product instead: `max_noise_level_squared`. The
 `noise_level_squared` on each ciphertext is the variance of the ciphertext phase error relative to the "nominal" noise level.
-By applying the "independence heuristic" and assuming that the ciphertexts we add have independent noise, we can calculate the propagated noise 
+By applying the "independence heuristic" (introduced in https://eprint.iacr.org/2016/870.pdf) and assuming that the ciphertexts 
+we add have independent noise, we can calculate the propagated noise 
 by adding the two `noise_level_squared` when adding the ciphertexts. This is due to the relation `var(X + Y) = var(X) + var(Y)` for
 independent random variables. It can also be seen as a dot product with weights (1, 1) of independent ciphertexts - the 
 squared L2 norm of this dot product is 2.

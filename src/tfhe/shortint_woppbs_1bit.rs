@@ -705,13 +705,37 @@ pub mod test {
         ciphertext_debug(&client_key, "b1", &b1);
         ciphertext_debug(&client_key, "b2", &b2);
 
-        let b1_boot1 = boot(&context, &b1);
-        let b1_boot2 = boot(&context, &b1);
-        let b2_boot1 = boot(&context, &b2);
+        let b1_boot_1 = boot(&context, &b1);
+        let b1_boot_2 = boot(&context, &b1);
+        let b2_boot_1 = boot(&context, &b2);
 
-        ciphertext_debug(&client_key, "b1_boot1", &b1_boot1);
-        ciphertext_debug(&client_key, "b1_boot2", &b1_boot2);
-        ciphertext_debug(&client_key, "b2_boot1", &b2_boot1);
+        ciphertext_debug(&client_key, "b1_boot_1", &b1_boot_1);
+        ciphertext_debug(&client_key, "b1_boot_2", &b1_boot_2);
+        ciphertext_debug(&client_key, "b2_boot_1", &b2_boot_1);
+
+        let b1_boot_const0_1 = boot_const_0(&context, &b1);
+        let b1_boot_const0_2 = boot_const_0(&context, &b1);
+        let b2_boot_const0_1 = boot_const_0(&context, &b2);
+
+        ciphertext_debug(&client_key, "b1_boot_const0_1", &b1_boot_const0_1);
+        ciphertext_debug(&client_key, "b1_boot_const0_2", &b1_boot_const0_2);
+        ciphertext_debug(&client_key, "b2_boot_const0_1", &b2_boot_const0_1);
+
+        let b1_boot_const1_1 = boot_const_1(&context, &b1);
+        let b1_boot_const1_2 = boot_const_1(&context, &b1);
+        let b2_boot_const1_1 = boot_const_1(&context, &b2);
+
+        ciphertext_debug(&client_key, "b1_boot_const1_1", &b1_boot_const1_1);
+        ciphertext_debug(&client_key, "b1_boot_const1_2", &b1_boot_const1_2);
+        ciphertext_debug(&client_key, "b2_boot_const1_1", &b2_boot_const1_1);
+
+        let b1_boot_add1_1 = boot_add_1(&context, &b1);
+        let b1_boot_add1_2 = boot_add_1(&context, &b1);
+        let b2_boot_add1_1 = boot_add_1(&context, &b2);
+
+        ciphertext_debug(&client_key, "b1_boot_add1_1", &b1_boot_add1_1);
+        ciphertext_debug(&client_key, "b1_boot_add1_2", &b1_boot_add1_2);
+        ciphertext_debug(&client_key, "b2_boot_add1_1", &b2_boot_add1_1);
     }
 
     fn ciphertext_debug(client_key: &ClientKey, label: &str, bit: &BitCt) {
@@ -720,11 +744,41 @@ pub mod test {
             &bit.ct,
         );
         let noise = encoding.0 - encode_bit(decode_bit(encoding)).0;
-        println!("noise {}: {:064b}", label, noise);
+        println!("noise {:20}: {:064b} {:064b}", label, noise, encoding.0);
     }
 
     fn boot(context: &FheContext, bit: &BitCt) -> BitCt {
         let lut = context.generate_lookup_table(1, 1, |bit| bit as u64);
+
+        context
+            .circuit_bootstrap(&[bit], &lut)
+            .into_iter()
+            .next()
+            .expect("one bit")
+    }
+
+    fn boot_add_1(context: &FheContext, bit: &BitCt) -> BitCt {
+        let lut = context.generate_lookup_table(1, 1, |bit| (bit + 1) as u64);
+
+        context
+            .circuit_bootstrap(&[bit], &lut)
+            .into_iter()
+            .next()
+            .expect("one bit")
+    }
+
+    fn boot_const_0(context: &FheContext, bit: &BitCt) -> BitCt {
+        let lut = context.generate_lookup_table(1, 1, |_bit|0);
+
+        context
+            .circuit_bootstrap(&[bit], &lut)
+            .into_iter()
+            .next()
+            .expect("one bit")
+    }
+
+    fn boot_const_1(context: &FheContext, bit: &BitCt) -> BitCt {
+        let lut = context.generate_lookup_table(1, 1, |_bit|1);
 
         context
             .circuit_bootstrap(&[bit], &lut)
