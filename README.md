@@ -40,7 +40,7 @@ implemented by adding ciphertexts and letting them overflow.
 ### `shorint_woppbs_1bit`
 
 For programmatic bootstrapping, this model uses bit extraction and circuit bootstrapping combined with vertical 
-packed (CMux tree) l<ookup table introduced in <https://eprint.iacr.org/2017/430.pdf> and implemented
+packed (CMux tree) lookup table introduced in <https://eprint.iacr.org/2017/430.pdf> and implemented
 in the WoP-PBS experimental features in `tfhe-rs`. Each ciphertext represents 1 bit. XOR is implemented as leveled
 operations by adding ciphertexts. Two additional mid-level primitives are introduced:
 
