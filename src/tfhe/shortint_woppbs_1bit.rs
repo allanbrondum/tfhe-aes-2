@@ -421,7 +421,9 @@ pub mod test {
     use super::*;
     use std::array;
 
-    use crate::{logger, util};
+    use crate::aes_128::fhe::data_model::{Block, Byte};
+    use crate::aes_128::fhe::fhe_encryption;
+    use crate::{aes_128, logger, util};
     use std::sync::{Arc, LazyLock};
     use tracing::level_filters::LevelFilter;
 
@@ -768,7 +770,7 @@ pub mod test {
     }
 
     fn boot_const_0(context: &FheContext, bit: &BitCt) -> BitCt {
-        let lut = context.generate_lookup_table(1, 1, |_bit|0);
+        let lut = context.generate_lookup_table(1, 1, |_bit| 0);
 
         context
             .circuit_bootstrap(&[bit], &lut)
@@ -778,12 +780,109 @@ pub mod test {
     }
 
     fn boot_const_1(context: &FheContext, bit: &BitCt) -> BitCt {
-        let lut = context.generate_lookup_table(1, 1, |_bit|1);
+        let lut = context.generate_lookup_table(1, 1, |_bit| 1);
 
         context
             .circuit_bootstrap(&[bit], &lut)
             .into_iter()
             .next()
             .expect("one bit")
+    }
+
+    #[test]
+    fn test_increment_1bit_adder() {
+        let (client_key, context) = KEYS_SQRD_LVL_64.clone();
+
+        let value_clear: aes_128::Block = [0; 16];
+        let value: Block<BitCt> =
+            fhe_encryption::encrypt_byte_array(client_key.as_ref(), &value_clear);
+
+        let start = Instant::now();
+        let value = increment_1bit_adder(&value, &context);
+        println!("1bit adder elapsed: {:?}", start.elapsed());
+
+        let value = increment_1bit_adder(&value, &context);
+
+        let value_clear = fhe_encryption::decrypt_byte_array(client_key.as_ref(), &value);
+
+        assert_eq!(value_clear[0..15], [0; 15]);
+        assert_eq!(value_clear[15], 2);
+    }
+
+    fn increment_1bit_adder(block: &Block<BitCt>, context: &FheContext) -> Block<BitCt> {
+        let add_fn = |val: u16| -> u64 {
+            let bits = util::u16_to_bits(val);
+            (bits[14] + bits[15]) as u64
+        };
+        let lut = context.generate_lookup_table(2, 2, add_fn);
+
+        let mut carry = BitCt::trivial(Cleartext(1), context.clone());
+        let res_block = array_rev(block.each_ref()).map(|byte| {
+            Byte::new(array_rev(byte.0.each_ref()).map(|bit| {
+                let out_bits = context.circuit_bootstrap(&[&carry, bit], &lut);
+
+                let [new_carry, new_bit] = out_bits.try_into().expect("two elements");
+                carry = new_carry;
+                new_bit
+            }))
+        });
+
+        block_rev(res_block)
+    }
+
+    #[test]
+    fn test_increment_8bit_adder() {
+        let (client_key, context) = KEYS_SQRD_LVL_64.clone();
+
+        let mut value_clear: aes_128::Block = [0; 16];
+        value_clear[15] = 255;
+        let value: Block<BitCt> =
+            fhe_encryption::encrypt_byte_array(client_key.as_ref(), &value_clear);
+
+        let start = Instant::now();
+        let value = increment_8bit_adder(&value, &context);
+        println!("8bit adder elapsed: {:?}", start.elapsed());
+
+        let value = increment_8bit_adder(&value, &context);
+        let value = increment_8bit_adder(&value, &context);
+
+        let value_clear = fhe_encryption::decrypt_byte_array(client_key.as_ref(), &value);
+
+        assert_eq!(value_clear[0..14], [0; 14]);
+        assert_eq!(value_clear[14], 1);
+        assert_eq!(value_clear[15], 2);
+    }
+
+    fn increment_8bit_adder(block: &Block<BitCt>, context: &FheContext) -> Block<BitCt> {
+        let add_fn = |val: u16| -> u64 { (val as u8) as u64 + util::u16_to_bits(val)[7] as u64 };
+        let lut = context.generate_lookup_table(9, 9, add_fn);
+
+        let mut carry = BitCt::trivial(Cleartext(1), context.clone());
+        let res_block = array_rev(block.each_ref()).map(|byte| {
+            let out_bits = context.circuit_bootstrap(
+                &[
+                    &carry, &byte.0[0], &byte.0[1], &byte.0[2], &byte.0[3], &byte.0[4], &byte.0[5],
+                    &byte.0[6], &byte.0[7],
+                ],
+                &lut,
+            );
+
+            let [new_carry, bit0, bit1, bit2, bit3, bit4, bit5, bit6, bit7] =
+                out_bits.try_into().expect("nine elements");
+            carry = new_carry;
+            Byte::new([bit0, bit1, bit2, bit3, bit4, bit5, bit6, bit7])
+        });
+
+        array_rev(res_block)
+    }
+
+    fn block_rev(mut block: Block<BitCt>) -> Block<BitCt> {
+        let block = block.map(|byte| Byte::new(array_rev(byte.0)));
+        array_rev(block)
+    }
+
+    fn array_rev<T, const N: usize>(mut array: [T; N]) -> [T; N] {
+        array.reverse();
+        array
     }
 }
